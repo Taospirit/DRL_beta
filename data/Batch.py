@@ -24,5 +24,6 @@ class Batch(object):
     def append(self):
         pass
 
-    def split(self):
-        pass
+
+# b = Batch(S=1, A=2, R=3, S_=4, M=5)
+# print (b.M)
