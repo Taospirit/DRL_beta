@@ -1,11 +1,16 @@
 import numpy as np
 import random
-from Batch import Batch
+# try:
+from drl.data import Batch
+# except ImportError:
+#     print ('NOT find pkg in pip, load local pkg')
+    
 
 class Buffer(object):
     def __init__(self, size):
         self._maxsize = size
-        self.clear()
+        self.memory = []
+        self.append_index = 0
 
     def __len__(self):
         return len(self.memory)
@@ -23,6 +28,7 @@ class Buffer(object):
         return random.sample(self.memory, batch_size)
 
     def clear(self):
+        # if self.memory: print (f'Buffer to be cleared, size is {len(self.memory)}')
         self.memory = []
         self.append_index = 0
 
@@ -43,14 +49,14 @@ class Buffer(object):
     def is_full(self):
         return len(self.memory) == self._maxsize
 
-test = Buffer(3)
-for i in range(5):
-    test.append(i, 22, 33, 44)
+# test = Buffer(3)
+# for i in range(5):
+#     test.append(i, 22, 33, 44)
 
-B = test.random_sample(2)
-for b in B:
-    # print (b)
-    print (b.S, b.A, b.R, b.S_)
+# B = test.random_sample(2)
+# for b in B:
+#     # print (b)
+#     print (b.S, b.A, b.R, b.S_)
 
-c = test.split(B)
-print (c)
+# c = test.split(B)
+# print (c)
