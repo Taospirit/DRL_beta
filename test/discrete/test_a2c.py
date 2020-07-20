@@ -41,15 +41,15 @@ env = gym.make("CartPole-v0")
 num_inputs  = env.observation_space.shape[0]
 num_outputs = env.action_space.n
 hidden_size = 256
-max_eps = 50000
-max_step = 300
+max_eps = 10000
+max_step = 100
 buffer_size = 10000
-batch_size = 50
+batch_size = 20
 
 buffer = Buffer(buffer_size)
 actor = Actor(num_inputs, num_outputs, hidden_size)
 critic = Critic(num_inputs, hidden_size)
-policy = A2C(actor, critic, actor_learn_freq=1, target_update_freq=20)
+policy = A2C(actor, critic, actor_learn_freq=10, target_update_freq=20)
 
 def check_reward(env, policy, test_eps_num, threshold):
     r_list = []
@@ -72,8 +72,8 @@ def check_reward(env, policy, test_eps_num, threshold):
         state = next_state
 
     train_done = np.mean(r_list) > threshold
-
-    return np.mean(r_list), train_done
+    reward_mean = np.mean(r_list)
+    return reward_mean, train_done
 
 # train_type = 'eval'
 
