@@ -1,10 +1,12 @@
 import os
 import numpy as np
+from copy import deepcopy
+
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Categorical
-
 
 class OneNetPolicy():
     def __init__(self, ac_net, plot_save_path):
@@ -176,42 +178,72 @@ class DoublePolicy():
     def learn(self):
         pass
 
-class A2CPolicy():
-    def __init__(self, actor_net, critic_net, plot_save_path):
-        self.lr = 0.01
+class A2CPolicy(): #trick: double, soft_update
+    def __init__(
+        self, 
+        actor_net, 
+        critic_net, 
+        plot_save_path,
+        target_update_fre=0,
+        learning_rate = 0.01
+        discount_factor = 0.99
+        ):
+        self.lr = learning_rate
         self.eps = np.finfo(np.float32).eps.item()
-        self.gamma = 0.99
+        self.gamma = discount_factor
 
         self.save_log_probs = []
         self.save_values = []
         self.save_rewards = []
         self.save_masks = []
-        self.end_state = None
-        self.end_value = 0
+        self.next_state = None
+        # self.end_value = 0
+        self._gamma = discount_factor
+        self._target = target_update_freq > 0
+        self._sync_cnt = 0
+        self._learn_critic_cnt = 0
+        self._learn_actor_cnt = 0
+        self._verbose = True
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.actor = actor_net.to(self.device)
-        self.critic = critic_net.to(self.device)
-        self.actor_optim = optim.Adam(self.actor.parameters(), lr=self.lr)
-        self.critic_optim = optim.Adam(self.critic.parameters(), lr=self.lr)
-        self.actor.train()
-        self.critic.train()
+        self.actor_eval = actor_net.to(self.device)
+        self.critic_eval = critic_net.to(self.device)
+        self.actor_eval_optim = optim.Adam(self.actor.parameters(), lr=self.lr)
+        self.critic_eval_optim = optim.Adam(self.critic.parameters(), lr=self.lr)
+        
+        self.actor_eval.train()
+        self.critic_eval.train()
+
+        if self._target:
+            self.actor_target = deepcopy(self.actor_eval)
+            self.critic_target = deepcopy(self.critic_eval)
+            self.actor_target.load_state_dict(self.actor_eval.state_dict())
+            self.critic_target.load_state_dict(self.critic_eval.state_dict())
+
+            self.actor_target.eval()
+            self.critic_target.eval()
+            
+        # 什么时候用eval?什么适合用train?
+        
+        #TODO
+        self.criterion = nn.SmoothL1Loss()
 
         os.makedirs(plot_save_path, exist_ok=True)
 
-    def choose_action(self, state):
-        self.actor.eval()
-        self.critic.eval()
+    def choose_action(self, state, test=False):
+        if test:
+            self.actor_eval.eval()
 
-        # state = torch.from_numpy(state).float().to(self.device)
         state = torch.tensor(state, dtype=torch.float32, device=self.device)
-        # actor
-        dist = self.actor(state)
+        dist = self.actor_eval(state)
         m = Categorical(dist)
         action = m.sample()
+        if test:
+            return action.item()
+
         log_prob = m.log_prob(action)
         # critic
-        state_value = self.critic(state)
+        state_value = self.critic_eval(state)
 
         self.save_log_probs.append(log_prob)
         self.save_values.append(state_value)
@@ -219,9 +251,11 @@ class A2CPolicy():
         return action.item()
 
     def learn(self):
-        self.critic.eval()
-        end_state = torch.tensor(self.end_state, dtype=torch.float32, device=self.device)
-        end_value = self.critic(end_state).item()
+        critic = self.critic_target if self._target else self.critic_eval
+        next_state = torch.tensor(self.next_state, dtype=torch.float32, device=self.device)
+        
+        end_value = critic(next_state).item()
+
         
         def compute_returns(next_value, rewards, masks, gamma=0.99):
             assert len(rewards) == len(masks), 'rewards & masks must have same length'
@@ -252,18 +286,18 @@ class A2CPolicy():
 
         value_loss = torch.stack([F.smooth_l1_loss(r, v) for r, v in zip(self.save_rewards, self.save_values)])
 
-        self.actor.train()
+        self.actor_eval.train()
         self.critic.train()
 
-        self.actor_optim.zero_grad()
+        self.actor_eval_optim.zero_grad()
         actor_loss = policy_loss.sum()
         actor_loss.backward()
-        self.actor_optim.step()
+        self.actor_eval_optim.step()
 
-        self.critic_optim.zero_grad()
+        self.critic_eval_optim.zero_grad()
         critic_loss = value_loss.sum()
         critic_loss.backward()
-        self.critic_optim.step()
+        self.critic_eval_optim.step()
 
         self.save_log_probs = []
         self.save_masks = []
@@ -287,7 +321,7 @@ class A2CPolicy():
                 state = env.reset()
                 break
 
-        self.end_state = state
+        self.next_state = state
         return i
 
 
