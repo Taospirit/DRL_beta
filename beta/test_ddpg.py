@@ -25,8 +25,8 @@ buffer_size = 50000
 actor_learn_freq = 1
 target_update_freq = 5
 batch_size = 300
-plot_save_dir = './save/ddpg_test'
-os.makedirs(plot_save_dir, exist_ok=True)
+model_save_dir = './save/test_ddpg'
+os.makedirs(model_save_dir, exist_ok=True)
 
 actor = ActorDPG(state_space, hidden_dim, action_space)
 critic = Critic(state_space, hidden_dim, action_space)
@@ -60,20 +60,29 @@ def save_setting():
     data = line.join([env_info, policy_info])
 
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    path = dir_path + plot_save_dir[1:] + '/' + plot_save_dir.split('/')[-1] + '.txt'
+    path = dir_path + model_save_dir[1:] + '/' + model_save_dir.split('/')[-1] + '.txt'
     with open(path, 'w+') as f:
         f.write(data)
 
+model = 'eval'
+save_file = model_save_dir.split('/')[-1]
 def main():
-    save_setting()
-    live_time = []
-    for i_eps in range(episodes):
-        rewards = policy.sample(env, max_step)
-        live_time.append(rewards)
-        plot(live_time, 'Training_DDPG_TwoNet_Double', plot_save_dir)
+    if model == 'train':
+        save_setting()
+        live_time = []
+        for i_eps in range(episodes):
+            step = policy.sample(env, max_step)
+            live_time.append(step)
+            plot(live_time, 'Training_DDPG_TwoNet_Double', model_save_dir)
+            
+            policy.learn()
+        policy.save_model(model_save_dir, save_file)
+    else:
+        policy.load_model(model_save_dir, save_file)
+        for _ in range(episodes):
+            policy.sample(env, max_step, test=True)
+        env.close()
 
-        policy.learn()
-    policy.save_model(plot_save_dir, plot_save_dir.split('/')[-1])
-    
+
 if __name__ == '__main__':
     main()

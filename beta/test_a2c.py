@@ -21,8 +21,8 @@ max_step = 1000
 actor_learn_freq=1
 target_update_freq=0
 
-plot_save_dir = './save/a2c_test'
-os.makedirs(plot_save_dir, exist_ok=True)
+model_save_dir = './save/test_a2c'
+os.makedirs(model_save_dir, exist_ok=True)
 
 actor = ActorNet(state_space, hidden_dim, action_space)
 critic = CriticNet(state_space, hidden_dim, 1)
@@ -56,20 +56,27 @@ def save_setting():
     data = line.join([env_info, policy_info])
 
     dir_path = os.path.dirname(os.path.abspath(__file__))
-    path = dir_path + plot_save_dir[1:] + '/' + plot_save_dir.split('/')[-1] + '.txt'
+    path = dir_path + model_save_dir[1:] + '/' + model_save_dir.split('/')[-1] + '.txt'
     with open(path, 'w+') as f:
         f.write(data)
 
+model = 'eval'
+save_file = model_save_dir.split('/')[-1]
 def main():
-    save_setting()
-    live_time = []
-    for i_eps in range(episodes):
-        step = policy.sample(env, max_step)
-        live_time.append(step)
-        plot(live_time, 'Training_A2C_TwoNet_no_Double', plot_save_dir)
-        
-        policy.learn()
-    policy.save_model(plot_save_dir, plot_save_dir.split('/')[-1])
-
+    if model == 'train':
+        save_setting()
+        live_time = []
+        for i_eps in range(episodes):
+            step = policy.sample(env, max_step)
+            live_time.append(step)
+            plot(live_time, 'Training_A2C_TwoNet_no_Double', model_save_dir)
+            
+            policy.learn()
+        policy.save_model(model_save_dir, save_file)
+    else:
+        policy.load_model(model_save_dir, save_file)
+        for _ in range(episodes):
+            policy.sample(env, max_step, test=True)
+        env.close()
 if __name__ == '__main__':
     main()
