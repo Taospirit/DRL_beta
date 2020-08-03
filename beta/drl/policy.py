@@ -36,10 +36,10 @@ class BasePolicy(ABC):
         save_path = save_dir + '/' + save_file_name + '.pth'
         torch.save(self.actor_eval.state_dict(), save_path)
 
-    def load_model(self, path):
-        assert isinstance(path, str)
-        assert path.split('.')[-1] == 'pth', "Why not a .pth file? Are U TFbooys?"
-        self.actor_eval.load_state_dict(torch.load(path))
+    def load_model(self, save_dir, save_file_name):
+        save_path = save_dir + '/' + save_file_name + '.pth'
+        assert  os.path.exists(save_path), 'No .pth file to load'
+        self.actor_eval.load_state_dict(torch.load(save_path))
 
 class A2CPolicy(BasePolicy): #option: double
     def __init__(
@@ -159,11 +159,11 @@ class A2CPolicy(BasePolicy): #option: double
             for target_param, eval_param in zip(target.parameters(), source.parameters()):
                 target_param.data.copy_(tau * eval_param.data + (1.0 - tau) * target_param.data)
 
-    def sample(self, env, max_steps):
+    def sample(self, env, max_steps, test=False):
         assert env, 'You must set env for sample'
         state = env.reset()
         for i in range(max_steps):
-            action = self.choose_action(state)
+            action = self.choose_action(state, test)
 
             next_state, reward, done, info = env.step(action)
             env.render()
@@ -186,7 +186,6 @@ class A2CPolicy(BasePolicy): #option: double
         mask = torch.tensor(mask, dtype=torch.float32)
         self.save_eps['rewards'].append(reward)
         self.save_eps['masks'].append(mask)
-
 
 
 class DDPGPolicy(BasePolicy):
@@ -305,7 +304,7 @@ class DDPGPolicy(BasePolicy):
             for target_param, eval_param in zip(target.parameters(), source.parameters()):
                 target_param.data.copy_(tau * eval_param.data + (1.0 - tau) * target_param.data)
 
-    def sample(self, env, max_steps):
+    def sample(self, env, max_steps, test=False):
         assert env, 'You must set env for sample'
         rewards = 0
         state = env.reset()
