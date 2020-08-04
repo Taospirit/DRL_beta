@@ -8,7 +8,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-from policy import BasicPolicy
+from base import BasePolicy
 
 class A2CPolicy(BasePolicy): #option: double
     def __init__(
@@ -17,7 +17,7 @@ class A2CPolicy(BasePolicy): #option: double
         critic_net, 
         actor_learn_freq=1,
         target_update_freq=0,
-        soft_tau=5e-3,
+        target_update_tau=5e-3,
         learning_rate=0.01,
         discount_factor=0.99,
         verbose = False
@@ -25,7 +25,7 @@ class A2CPolicy(BasePolicy): #option: double
         super().__init__()
         self.lr = learning_rate
         self.eps = np.finfo(np.float32).eps.item()
-        self.tau = soft_tau
+        self.tau = target_update_tau
         self.save_eps = {'log_probs':[], 'values':[], 'rewards':[], 'masks': []}
 
         self.next_state = None
@@ -122,30 +122,27 @@ class A2CPolicy(BasePolicy): #option: double
         
         self.save_eps = {'log_probs':[], 'values':[], 'rewards':[], 'masks': []}
 
-    @staticmethod
-    def soft_sync_weight(target, source, tau=0.01):
-        with torch.no_grad():
-            for target_param, eval_param in zip(target.parameters(), source.parameters()):
-                target_param.data.copy_(tau * eval_param.data + (1.0 - tau) * target_param.data)
-
-    def sample(self, env, max_steps):
+    def sample(self, env, max_steps, test=False):
         assert env, 'You must set env for sample'
+        reward_avg = 0
         state = env.reset()
-        for i in range(max_steps):
-            action = self.choose_action(state)
+        for step in range(max_steps):
+            action = self.choose_action(state, test)
 
             next_state, reward, done, info = env.step(action)
             env.render()
             # process env callback
             self.process(s=state, a=action, s_=next_state, r=reward, d=done, i=info)
+            reward_avg += reward
 
             if done:
                 state = env.reset()
                 break
             state = next_state
         self.next_state = state
-        
-        return i
+        if self._verbose: print (f'------End eps at {step} steps------')
+
+        return reward_avg/step
 
     def process(self, **kwargs):
         reward, done = kwargs['r'], kwargs['d']
@@ -155,4 +152,3 @@ class A2CPolicy(BasePolicy): #option: double
         mask = torch.tensor(mask, dtype=torch.float32)
         self.save_eps['rewards'].append(reward)
         self.save_eps['masks'].append(mask)
-

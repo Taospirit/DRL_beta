@@ -22,7 +22,7 @@ class ActorNet(nn.Module):
         dist = F.softmax(action_score, dim=-1)
         return dist
 
-class CriticNet(nn.Module):
+class CriticV(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
@@ -60,7 +60,7 @@ class ActorDPG(nn.Module):
         action = self.net(state)
         return action
 
-class Critic(nn.Module):
+class CriticQ(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
         # inpur_dim = state_dim + action_dim, 

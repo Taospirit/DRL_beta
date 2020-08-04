@@ -2,7 +2,7 @@ import gym, os, time
 import matplotlib.pyplot as plt
 import torch
 
-from drl.model import ActorNet, CriticNet
+from drl.model import ActorNet, CriticV
 from drl.policy import A2CPolicy as Policy
 
 env_name = 'CartPole-v0'
@@ -24,7 +24,7 @@ model_save_dir = './save/test_a2c'
 os.makedirs(model_save_dir, exist_ok=True)
 
 actor = ActorNet(state_space, hidden_dim, action_space)
-critic = CriticNet(state_space, hidden_dim, 1)
+critic = CriticV(state_space, hidden_dim, 1)
 policy = Policy(actor, critic, actor_learn_freq=actor_learn_freq, target_update_freq=target_update_freq)
 
 
@@ -37,7 +37,6 @@ def plot(steps, y_label, model_save_dir):
     ax.set_ylabel('Run Reward')
     ax.plot(steps)
     RunTime = len(steps)
-
     path = model_save_dir + '/RunTime' + str(RunTime) + '.jpg'
     if len(steps) % 50 == 0:
         plt.savefig(path)
@@ -60,7 +59,7 @@ def save_setting():
         f.write(data)
 
 run_type = ['train', 'eval', 'retrain']
-run = run_type[1]
+run = run_type[0]
 save_file = model_save_dir.split('/')[-1]
 
 def main():
@@ -112,7 +111,6 @@ def main():
 
     else:
         print ('Setting your run type!')
-
 
 
 if __name__ == '__main__':

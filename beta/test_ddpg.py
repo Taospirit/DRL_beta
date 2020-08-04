@@ -2,7 +2,7 @@ import gym, os, time
 import matplotlib.pyplot as plt
 import torch
 
-from drl.model import ActorDPG, Critic
+from drl.model import ActorDPG, CriticQ
 from drl.policy import DDPGPolicy as Policy
 from drl.buffer import ReplayBuffer as Buffer
 
@@ -28,7 +28,7 @@ model_save_dir = './save/test_ddpg'
 os.makedirs(model_save_dir, exist_ok=True)
 
 actor = ActorDPG(state_space, hidden_dim, action_space)
-critic = Critic(state_space, hidden_dim, action_space)
+critic = CriticQ(state_space, hidden_dim, action_space)
 buffer = Buffer(buffer_size)
 policy = Policy(actor, critic, buffer, actor_learn_freq=actor_learn_freq, target_update_freq=target_update_freq, batch_size=batch_size)
 
