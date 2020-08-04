@@ -1,20 +1,20 @@
 env: Pendulum-v0 
 state_space: 3, action_space: 1
-episodes: 1000, max_step: 100
+episodes: 5000, max_step: 200
 ===============================
 lr: 0.01 
 eps: 1.1920928955078125e-07 
 next_state: None 
-actor_learn_freq: 1 
-target_update_freq: 5 
+actor_learn_freq: 5 
+target_update_freq: 10 
 _gamma: 0.99 
 _target: True 
 _update_iteration: 10 
 _sync_cnt: 0 
 _learn_cnt: 0 
 _verbose: False 
-_buffer: <drl.buffer.ReplayBuffer object at 0x7f7086686f98> 
-_batch_size: 300 
+_buffer: <drl.buffer.ReplayBuffer object at 0x7f340dfb72b0> 
+_batch_size: 1000 
 device: cuda 
 actor_eval: ActorDPG(
   (net): Sequential(

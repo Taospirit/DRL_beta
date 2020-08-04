@@ -33,13 +33,31 @@ class BasePolicy(ABC):
     def save_model(self, save_dir, save_file_name):
         assert isinstance(save_dir, str) and isinstance(save_file_name, str)
         os.makedirs(save_dir, exist_ok=True)
-        save_path = save_dir + '/' + save_file_name + '.pth'
-        torch.save(self.actor_eval.state_dict(), save_path)
+        save_path = os.path.join(save_dir, save_file_name)
+        actor_save = save_path + '_actor.pth'
+        critic_save = save_path + '_critic.pth'
+        torch.save(self.actor_eval.state_dict(), actor_save)
+        torch.save(self.critic_eval.state_dict(), critic_save)
+        print (f'Save actor-critic model in {save_path}!')
 
-    def load_model(self, save_dir, save_file_name):
-        save_path = save_dir + '/' + save_file_name + '.pth'
-        assert  os.path.exists(save_path), 'No .pth file to load'
-        self.actor_eval.load_state_dict(torch.load(save_path))
+    def load_model(self, save_dir, save_file_name, test=False):
+        save_path = os.path.join(save_dir, save_file_name)
+        actor_save = save_path + '_actor.pth'
+        assert os.path.exists(actor_save), f'No {actor_save} file to load'
+        self.actor_eval.load_state_dict(torch.load(actor_save))
+        print (f'Loading actor model success!')
+        if test: return
+        critic_save = save_path + '_critic.pth'
+        assert os.path.exists(critic_save), f'No {critic_save} file to load'
+        self.critic_eval.load_state_dict(torch.load(critic_save))
+        print (f'Loading critic model success!')
+
+    @staticmethod
+    def soft_sync_weight(target, source, tau=0.01):
+        with torch.no_grad():
+            for target_param, eval_param in zip(target.parameters(), source.parameters()):
+                target_param.data.copy_(tau * eval_param.data + (1.0 - tau) * target_param.data)
+
 
 class A2CPolicy(BasePolicy): #option: double
     def __init__(
@@ -48,7 +66,7 @@ class A2CPolicy(BasePolicy): #option: double
         critic_net, 
         actor_learn_freq=1,
         target_update_freq=0,
-        soft_tau=5e-3,
+        target_update_tau=5e-3,
         learning_rate=0.01,
         discount_factor=0.99,
         verbose = False
@@ -56,7 +74,7 @@ class A2CPolicy(BasePolicy): #option: double
         super().__init__()
         self.lr = learning_rate
         self.eps = np.finfo(np.float32).eps.item()
-        self.tau = soft_tau
+        self.tau = target_update_tau
         self.save_eps = {'log_probs':[], 'values':[], 'rewards':[], 'masks': []}
 
         self.next_state = None
@@ -153,30 +171,27 @@ class A2CPolicy(BasePolicy): #option: double
         
         self.save_eps = {'log_probs':[], 'values':[], 'rewards':[], 'masks': []}
 
-    @staticmethod
-    def soft_sync_weight(target, source, tau=0.01):
-        with torch.no_grad():
-            for target_param, eval_param in zip(target.parameters(), source.parameters()):
-                target_param.data.copy_(tau * eval_param.data + (1.0 - tau) * target_param.data)
-
     def sample(self, env, max_steps, test=False):
         assert env, 'You must set env for sample'
+        reward_avg = 0
         state = env.reset()
-        for i in range(max_steps):
+        for step in range(max_steps):
             action = self.choose_action(state, test)
 
             next_state, reward, done, info = env.step(action)
             env.render()
             # process env callback
             self.process(s=state, a=action, s_=next_state, r=reward, d=done, i=info)
+            reward_avg += reward
 
             if done:
                 state = env.reset()
                 break
             state = next_state
         self.next_state = state
-        
-        return i
+        if self._verbose: print (f'------End eps at {step} steps------')
+
+        return reward_avg/step
 
     def process(self, **kwargs):
         reward, done = kwargs['r'], kwargs['d']
@@ -196,6 +211,7 @@ class DDPGPolicy(BasePolicy):
         buffer,
         actor_learn_freq=1,
         target_update_freq=0,
+        target_update_tau=5e-3,
         learning_rate=0.01,
         discount_factor=0.99,
         batch_size=100,
@@ -204,6 +220,7 @@ class DDPGPolicy(BasePolicy):
         super().__init__()
         self.lr = learning_rate
         self.eps = np.finfo(np.float32).eps.item()
+        self.tau = target_update_tau
 
         self.next_state = None
         self.actor_learn_freq = actor_learn_freq
@@ -250,7 +267,9 @@ class DDPGPolicy(BasePolicy):
         # return action.cpu().data.numpy().flatten()
 
     def learn(self):
-        loss_actor_avg, loss_critic_avg = 0, 0
+        loss_actor_avg = 0
+        loss_critic_avg = 0
+        actor_cnt = 0
 
         for _ in range(self._update_iteration):
             memory_batchs = self._buffer.random_sample(self._batch_size)
@@ -286,44 +305,41 @@ class DDPGPolicy(BasePolicy):
                 self.actor_eval_optim.zero_grad()
                 actor_loss.backward()
                 self.actor_eval_optim.step()
+                actor_cnt += 1
+                if self._verbose: print (f'=======Learn_Actort_Net=======')
 
             if self._target:
                 if self._learn_cnt % self.target_update_freq == 0:
                     if self._verbose: print (f'=======Soft_sync_weight of DDPG=======')
-                    self.soft_sync_weight(self.critic_target, self.critic_eval)
-                    self.soft_sync_weight(self.actor_target, self.actor_eval)
+                    self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
+                    self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
         
-        loss_actor_avg /= self._update_iteration
+        loss_actor_avg /= actor_cnt
         loss_critic_avg /= self._update_iteration
 
         return loss_actor_avg, loss_critic_avg
 
-    @staticmethod
-    def soft_sync_weight(target, source, tau=0.01):
-        with torch.no_grad():
-            for target_param, eval_param in zip(target.parameters(), source.parameters()):
-                target_param.data.copy_(tau * eval_param.data + (1.0 - tau) * target_param.data)
-
     def sample(self, env, max_steps, test=False):
         assert env, 'You must set env for sample'
-        rewards = 0
+        reward_avg = 0
         state = env.reset()
-        for i in range(max_steps):
-            action = self.choose_action(state)
+        for step in range(max_steps):
+            action = self.choose_action(state, test)
             action = action.clip(-1, 1)
             action_max = env.action_space.high[0]
 
             next_state, reward, done, info = env.step(action * action_max)
             env.render()
             self.process(s=state, a=action, s_=next_state, r=reward, d=done, i=info)
-            rewards += reward
+            reward_avg += reward
             # process env callback
             if done:
                 state = env.reset()
                 break
             state = next_state
+        if self._verbose: print (f'------End eps at {step} steps------')
 
-        return rewards
+        return reward_avg/(step+1)
 
     def process(self, **kwargs):
         state, action, next_state, reward = kwargs['s'], kwargs['a'], kwargs['s_'], kwargs['r']
