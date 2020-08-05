@@ -1,19 +1,30 @@
 import numpy as np
 import random
 from collections import namedtuple
-
+# from batch import Batch
 
 class ReplayBuffer(object):
-    def __init__(self, size):
+    def __init__(self, size, replay=True):
         self._maxsize = size
         self.memory = []
         self.memory_tuple = namedtuple('memory_tuple', ['S', 'A', 'S_', 'R'])
         self.append_index = 0
+        self.allow_replay = replay
 
     def __len__(self):
         return len(self.memory)
 
-    def append(self, state, action, next_state, reward):
+    def append(self, **kwargs):
+        if not self.allow_replay and self.is_full():
+            return 
+        # memory_tuple = Batch(**kwargs)
+        memory_tuple = kwargs
+        if len(self.memory) < self._maxsize:
+            self.memory.append(None)
+        self.memory[self.append_index] = memory_tuple
+        self.append_index = (self.append_index + 1) % self._maxsize
+
+    def append_(self, state, action, next_state, reward):
         # memory_tuple = Batch(S=state, A=action, R=reward, S_=state_)
         memory_tuple = self.memory_tuple(state, action, next_state, reward)
         if len(self.memory) < self._maxsize:
@@ -27,28 +38,38 @@ class ReplayBuffer(object):
     def clear(self):
         self.memory = []
         self.append_index = 0
+        print (f'Clear buffer size of {self._maxsize}!') 
 
     def show(self):
         print (self.memory)
 
     def split(self, batchs):
-        # assert isinstance(batchs[-1], Batch)
-        # keys = vars(batchs[-1]).keys()
-        # State, Action, Reward, State_ = [], [], [], []
-        Batch_S = [item.S for item in batchs]
-        Batch_A = [item.A for item in batchs]
-        Batch_S_ = [item.S_ for item in batchs]
-        Batch_R = [item.R for item in batchs]
+        ans = {}
+        keys = batchs[-1].keys()
+        for key in keys:
+            values = [item[key] for item in batchs]
+            ans[key] = values
 
-        return Batch_S, Batch_A, Batch_S_, Batch_R
+        return ans
 
     def is_full(self):
         return len(self.memory) == self._maxsize
 
-# test = Buffer(3)
-# for i in range(5):
-#     test.append(i, 22, 33, 44)
+    def capacity(self):
+        return self._maxsize
 
+    def all_memory(self):
+        return self.memory
+
+# test = ReplayBuffer(5)
+# for i in range(5):
+#     test.append(i=i, ans=[1, i], cc=f'{i}: c')
+
+# # test.show()
+# sam = test.random_sample(2)
+# print (sam)
+# ans = test.split(sam)
+# print (ans)
 # B = test.random_sample(2)
 # for b in B:
 #     # print (b)
