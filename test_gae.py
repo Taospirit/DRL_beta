@@ -10,28 +10,31 @@ def gae(rewards, v_evals, gamma, lam): # [r1, r2, ..., rT], [V1, V2, ... ,VT, VT
     for i in reversed(range(rew_len)):
         nonterminal = 1 # to be fixed
         delta = rewards[i] + gamma * v_evals[i+1] * nonterminal - v_evals[i]
-        adv_gae[i] = lastgaelam = delta + gamma * lam * nonterminal * lastgaelam
-        # print (f'at index{i}, adv is {}')
+        adv_gae[i] = lastgaelam = delta + gamma * lam * lastgaelam
+    
+        # adv_gae[i] = lastgaelam = rewards[i] + gamma * lam * lastgaelam
     # return adv_gae
-    ret = [v + adv for v, adv in zip(v_evals, adv_gae)]
-    print (f'age_ret {ret}')
+    # ret = [v + adv for v, adv in zip(v_evals, adv_gae)]
+    
+    # print (f'age_ret {ret}')
+    print (f'age_ret {adv_gae}')
 
 def compute_returns(rewards, masks, gamma=0.99):
     assert len(rewards) == len(masks), 'rewards & masks must have same length'
     R = 0
-    returns = []
+    returns = np.empty(len(rewards), 'float32')
     for step in reversed(range(len(rewards))):
         # print (masks[-2:])
-        R = rewards[step] + gamma * R * masks[step]
-        returns.insert(0, R)
+        R = rewards[step] + gamma * R *masks[step]
+        returns[step] = R
     # return returns
-    print (f'com_ret {returns}')
+    print (f'com_ret {returns}') 
 
 r = [1, 2, 5, 7, 11, -20, 1, 2, 4]
-v = [1, 2, 3, 4, 5, 6, 1, 2, 3]
-m = [1, 1, 1, 1, 1, 0, 1, 1, 1]
+m = [1, 1, 1, 1, 1, 1, 1, 1, 1]
+v = [123, 23, 32, 41, 41, 13, 12, 31, 12]
 v.append(0)
-compute_returns(r, m, gamma=0.1)
-gae(r, v, gamma=0.1, lam=1)
+compute_returns(r, m, gamma=1)
+gae(r, v, gamma=1, lam=0.0)
 
 
