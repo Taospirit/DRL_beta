@@ -22,7 +22,7 @@ max_step = 200
 buffer_size = 2000
 actor_learn_freq = 1
 target_update_freq = 0
-batch_size = 200
+batch_size = 300
 model_save_dir = './save/test_ppo'
 os.makedirs(model_save_dir, exist_ok=True)
 

@@ -1,6 +1,6 @@
 env: CartPole-v0 
 state_space: 4, action_space: 2
-episodes: 5000, max_step: 200
+episodes: 10000, max_step: 200
 ===============================
 lr: 0.01 
 eps: 1.1920928955078125e-07 
@@ -15,8 +15,8 @@ _update_iteration: 10
 _sync_cnt: 0 
 _learn_cnt: 0 
 _verbose: False 
-_batch_size: 200 
-buffer: <drl.buffer.ReplayBuffer object at 0x7f6f07792cf8> 
+_batch_size: 300 
+buffer: <drl.buffer.ReplayBuffer object at 0x7f6b75080cc0> 
 device: cuda 
 actor_eval: ActorNet(
   (fc1): Linear(in_features=4, out_features=32, bias=True)
