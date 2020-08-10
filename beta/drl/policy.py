@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Categorical, Normal
+from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
+
 
 from abc import ABC, abstractmethod
 
@@ -60,7 +62,7 @@ class BasePolicy(ABC):
 
     @staticmethod
     def GAE(rewards, v_evals, next_v_eval=0, masks=None, gamma=0.99, lam=1): # [r1, r2, ..., rT], [V1, V2, ... ,VT, VT+1]
-        '''
+        r'''
         Compute target value using TD(lambda) estimator, and advantage with GAE(lambda)
 
         :param gamma: (float) Discount factor
@@ -377,7 +379,7 @@ class PPOPolicy(BasePolicy): #option: double
         actor_learn_freq=1,
         target_update_freq=0,
         target_update_tau=5e-3,
-        learning_rate=0.01,
+        learning_rate=0.0001,
         discount_factor=0.99,
         batch_size=100,
         verbose = False
@@ -386,7 +388,7 @@ class PPOPolicy(BasePolicy): #option: double
         self.lr = learning_rate
         self.eps = np.finfo(np.float32).eps.item()
         self.tau = target_update_tau
-        self.ratio_clip = 0.25
+        self.ratio_clip = 0.2
         # self.save_data = {'s':[], 'a':[], 's_':[], 'r':[], 'l':[]}
 
         self.next_state = None
@@ -396,9 +398,11 @@ class PPOPolicy(BasePolicy): #option: double
         self._target = target_update_freq > 0
         self._update_iteration = 10
         self._sync_cnt = 0
-        self._learn_cnt = 0
-        # self._learn_critic_cnt = 0
-        # self._learn_actor_cnt = 0
+        # self._learn_cnt = 0
+
+        self._learn_critic_cnt = 0
+        self._learn_actor_cnt = 0
+
         self._verbose = verbose
         self._batch_size = batch_size
         self.buffer = buffer
@@ -425,75 +429,78 @@ class PPOPolicy(BasePolicy): #option: double
         self.criterion = nn.SmoothL1Loss()
 
     def choose_action(self, state, test=False):
+        # print (f'before state: {state}')
         state = torch.tensor(state, dtype=torch.float32, device=self.device)
-        
-        if test:
-            self.actor_eval.eval()
-            return Categorical(self.actor_eval(state)).sample().item()
-        
-        dist = self.actor_eval(state)
-        m = Categorical(dist)
-        action = m.sample()
-        log_prob = m.log_prob(action)
+        # print (f'after state: {state}')
+
+        # if test:
+        #     self.actor_eval.eval()
+        #     return Categorical(self.actor_eval(state)).sample().item()
         # dist = self.actor_eval(state)
         # m = Categorical(dist)
         # action = m.sample()
         # log_prob = m.log_prob(action)
-        # if test:
-        #     self.actor_eval.eval()
 
-        # with torch.no_grad():
-        #     mu, sigma = self.actor_eval(state)        
-        # dist = Normal(mu, sigma)
-        # action = dist.sample()
-        # log_prob = dist.log_prob(action)
-        # return action.item(), log_prob.item()
+        if test:
+            self.actor_eval.eval()
+        with torch.no_grad():
+            mu, sigma = self.actor_eval(state)
+            # print (f'mu {mu} sigma {sigma}')    
+        dist = Normal(mu, sigma)
+        action = dist.sample()
+        # print (f'mu:{mu}, sigma:{sigma}, dist: {dist}, action sample before clamp: {action}')
+        action = action.clamp(-2, 2)
+        # print (f'action after clamp {action}')
+        log_prob = dist.log_prob(action)
+        assert  abs(action.item())<=2, f'ERROR: action out of {action}'
+
         return action.item(), log_prob.item()
 
+    def get_batchs_indices(self, buffer_size, batch_size, replace=True, batch_num=None):
+        indices = [i for i in range(buffer_size)]
+        if replace: # 有放回的采样
+            if not batch_num:
+                batch_num = round(buffer_size / batch_size + 0.5) * 2
+            return [np.random.choice(indices, batch_size, replace=False) for _ in range(batch_num)]
+        else:# 无放回的采样
+            np.random.shuffle(indices)
+            return [indices[i: i + batch_size] for i in range(0, buffer_size, batch_size)]
+
     def learn(self):
+        # print (f'Buffer cap is {self.buffer.capacity()}, now is {len(self.buffer)}, is_full {self.buffer.is_full()}')
         if not self.buffer.is_full(): 
             print (f'Waiting for a full buffer: {len(self.buffer)}\{self.buffer.capacity()} ', end='\r')
             return 0, 0
+
         loss_actor_avg = 0
         loss_critic_avg = 0
-        actor_cnt = 0
 
         memory_split = self.buffer.split(self.buffer.all_memory())
-        all_S = torch.tensor(memory_split['s'], dtype=torch.float32, device=self.device)
-        all_A = torch.tensor(memory_split['a'], dtype=torch.float32, device=self.device)
-        all_S_ = torch.tensor(memory_split['s_'], dtype=torch.float32, device=self.device)
-        all_R = torch.tensor(memory_split['r'], dtype=torch.float32, device=self.device).unsqueeze(-1)
-        all_Log = torch.tensor(memory_split['l'], dtype=torch.float32, device=self.device).unsqueeze(-1)
+        S = torch.tensor(memory_split['s'], dtype=torch.float32, device=self.device)
+        A = torch.tensor(memory_split['a'], dtype=torch.float32, device=self.device).unsqueeze(-1)
+        S_ = torch.tensor(memory_split['s_'], dtype=torch.float32, device=self.device)
+        R = torch.tensor(memory_split['r'], dtype=torch.float32, device=self.device).unsqueeze(-1)
+        Log = torch.tensor(memory_split['l'], dtype=torch.float32, device=self.device).unsqueeze(-1)
+        # print (f'SIZE S {S.size()}, A {A.size()}, S_ {S_.size()}, R {R.size()}, Log {Log.size()}')
+        # print (f'S is {S}')
+        # print (f'S_ is {S_}')
 
-        rewards = all_R.cpu().numpy()
-        with torch.no_grad():
-            v_evals = self.critic_eval(all_S).cpu().numpy()
-            end_s_ = torch.tensor(memory_split['s_'][-1], dtype=torch.float32, device=self.device)
-            end_v_eval = self.critic_eval(end_s_).cpu().numpy()
+        rewards = R.cpu().numpy()
+        v_evals = self.critic_eval(S).detach().cpu().numpy()
+        end_v_eval = self.critic_eval(S_[-1]).detach().cpu().numpy()
 
         adv_gae_td = self.GAE(rewards, v_evals, next_v_eval=end_v_eval, gamma=self._gamma, lam=0) # td_error adv
         advantage = torch.from_numpy(adv_gae_td).to(self.device).unsqueeze(-1)
 
-        # print (f'Size: S:{all_S.size()}, R:{all_R.size()}, advantage:{advantage.size()}, Log: {all_Log.size()}')
+        # print (f'Size: S:{S.size()}, R:{R.size()}, advantage:{advantage.size()}, Log: {Log.size()}')
 
+        batch_size = min(len(self.buffer), self._batch_size)
         for _ in range(self._update_iteration):
-            batch_size = min(len(self.buffer), self._batch_size)
-            indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+ 
+            # S, A, old_log_prob = S, A, Log
 
-            S = all_S[indices]
-            A = all_A[indices]
-            S_ = all_S_[indices]
-            R = all_R[indices].reshape(-1, 1)
-            Log = all_Log[indices]
-            # print (f'Size: S:{S.size()}, A:{A.size()}, S_:{S_.size()}, R: {R.size()}, Log:{Log.size()}')
-
-            # critic_core
-            with torch.no_grad():
-                v_target = self.critic_eval(S_)
-                if self._target:
-                    v_target = self.critic_target(S_)
-                v_target = R + self._gamma * v_target
             v_eval = self.critic_eval(S)
+            v_target = advantage + v_eval.detach()
 
             critic_loss = self.criterion(v_eval, v_target)
             loss_critic_avg += critic_loss.item()
@@ -501,71 +508,79 @@ class PPOPolicy(BasePolicy): #option: double
             self.critic_eval_optim.zero_grad()
             critic_loss.backward()
             self.critic_eval_optim.step()
-            self._learn_cnt += 1
+            self._learn_critic_cnt += 1
             
-            if self._learn_cnt % self.actor_learn_freq == 0:
+            if self._learn_critic_cnt % self.actor_learn_freq == 0:
                 # actor_core
+                mu, sigma = self.actor_eval(S)
+                dist = Normal(mu, sigma)
+                new_log_prob = dist.log_prob(A)
                 
-                # mu, sigma = self.actor_eval(S)
-                # dist = Normal(mu, sigma)
-                # new_log_prob = dist.log_prob(A)
-                
-                dist = self.actor_eval(S)
-                m = Categorical(dist)
-                action = m.sample()
-                new_log_prob = m.log_prob(action)
-                new_log_prob = new_log_prob.reshape(-1, 1)
+                #=======GET NEW LOG========
+                # dist = self.actor_eval(S)
+                # m = Categorical(dist)
+                # action = m.sample()
+                # new_log_prob = m.log_prob(action)
+                # new_log_prob = new_log_prob.reshape(-1, 1)
+                #==========================
 
-                ratio = torch.exp(new_log_prob - Log) # size = [batch_size, 1]
-                # print (f'new {new_log_prob.size()}, old {Log.size()}')
-                # print (f'ratio-1 {ratio-1}')
-                # print (f'ratio clip {ratio.clamp(0.9, 1.1)}')
-                # print (f'ratio size {ratio.size()}')
-                # surrogate objective of TRPO
-                L1 = advantage[indices] * ratio 
-                L2 = advantage[indices] * ratio.clamp(1.0 - self.ratio_clip, 1.0 + self.ratio_clip)
-                print (f'Size L1 {L1.size()}, L2 {L2.size()}')
-                Clipped_surrogate_objective_function = -torch.min(L1, L2).mean()
+                pg_ratio = torch.exp(new_log_prob - Log) # size = [batch_size, 1]
+                clipped_pg_ratio = torch.clamp(pg_ratio, 1.0 - self.ratio_clip, 1.0 + self.ratio_clip)
+
+                surrogate_loss = -torch.min(pg_ratio, clipped_pg_ratio).mean()
+               
                 # policy entropy
-                loss_entropy = torch.mean(torch.exp(new_log_prob) * new_log_prob)
-                lambda_entropy = 0
+                loss_entropy = -torch.mean(torch.exp(new_log_prob) * new_log_prob)
+                lambda_entropy = 0.01
+                
+                actor_loss = surrogate_loss - lambda_entropy * loss_entropy
 
-                actor_loss = Clipped_surrogate_objective_function + lambda_entropy * loss_entropy
                 loss_actor_avg += actor_loss.item()
 
                 self.actor_eval_optim.zero_grad()
                 actor_loss.backward()
                 self.actor_eval_optim.step()
-                actor_cnt += 1
+                self._learn_actor_cnt += 1
                 if self._verbose: print (f'=======Learn_Actort_Net=======')
 
             if self._target:
-                if self._learn_cnt % self.target_update_freq == 0:
+                if self._learn_critic_cnt % self.target_update_freq == 0:
                     if self._verbose: print (f'=======Soft_sync_weight of DDPG=======')
                     self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
                     self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
-        
+    
         self.buffer.clear()
-        print (f'critic_cnt {self._learn_cnt}, actor_cnt {actor_cnt}')
-        loss_actor_avg /= actor_cnt
+        assert self.buffer.is_empty()
+
+        print (f'critic_cnt {self._learn_critic_cnt}, actor_cnt {self._learn_actor_cnt}')
+        loss_actor_avg /= (self._update_iteration/self.actor_learn_freq)
         loss_critic_avg /= self._update_iteration
 
         return loss_actor_avg, loss_critic_avg
 
-    def sample(self, env, max_steps, test=False):
+    def sample(self, env, max_step, test=False):
         assert env, 'You must set env for sample'
         reward_avg = 0
         state = env.reset()
-        for step in range(max_steps):
+        # print (f'init_state is {state}')
+
+        for step in range(max_step):
+        # while True:
             action, log_prob = self.choose_action(state, test)
+            # print (f'action is {action}')
             # action = np.clip(action, -1, 1)
             # action_max = env.action_space.high[0]
             # print (action*action_max)
 
-            next_state, reward, done, info = env.step(action)
+            # print (f'state is {state}, action {action}')
+            next_state, reward, done, info = env.step([action])
+            # print (f'==========next_state is {next_state}')
             env.render()
             # process env callback
-            self.process(s=state, a=action, s_=next_state, r=reward, l=log_prob)
+            self.process(s=state, a=action, s_=next_state, r=(reward+8)/8, l=log_prob)
+                        
+            # learn
+            self.learn()
             # for process test
             # if len(self.save_data['s']) < len(self.buffer):
             #     self.save_data['s'].append(state)
@@ -577,13 +592,17 @@ class PPOPolicy(BasePolicy): #option: double
             reward_avg += reward
 
             if done:
-                state = env.reset()
+                print (f'===Done in step {step}')
+                # state = env.reset()
                 break
             state = next_state
-        self.next_state = state
+            
+        # print (f'not Done in step {step}')
+
+        # self.next_state = state
         if self._verbose: print (f'------End eps at {step} steps------')
 
-        return reward_avg
+        return reward_avg/step
 
     def process(self, **kwargs):
         self.buffer.append(**kwargs)
