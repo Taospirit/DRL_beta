@@ -24,29 +24,20 @@ class ReplayBuffer(object):
         self.memory[self.append_index] = memory_tuple
         self.append_index = (self.append_index + 1) % self._maxsize
 
-    def append_(self, state, action, next_state, reward):
-        # memory_tuple = Batch(S=state, A=action, R=reward, S_=state_)
-        memory_tuple = self.memory_tuple(state, action, next_state, reward)
-        if len(self.memory) < self._maxsize:
-            self.memory.append(None)
-        self.memory[self.append_index] = memory_tuple
-        self.append_index = (self.append_index + 1) % self._maxsize
-
     def random_sample(self, batch_size):
         return random.sample(self.memory, min(batch_size, len(self.memory)))
 
     def clear(self):
         self.memory = []
         self.append_index = 0
-        print (f'Clear buffer size of {self._maxsize}!') 
+        print (f'----------Clear buffer size of {self._maxsize}!----------') 
 
     def show(self):
         print (self.memory)
 
     def split(self, batchs):
         ans = {}
-        keys = batchs[-1].keys()
-        for key in keys:
+        for key in batchs[-1].keys():
             values = [item[key] for item in batchs]
             ans[key] = values
 
@@ -54,6 +45,9 @@ class ReplayBuffer(object):
 
     def is_full(self):
         return len(self.memory) == self._maxsize
+    
+    def is_empty(self):
+        return len(self.memory) == 0
 
     def capacity(self):
         return self._maxsize
