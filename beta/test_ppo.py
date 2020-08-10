@@ -2,11 +2,11 @@ import gym, os, time
 import matplotlib.pyplot as plt
 import torch
 
-from drl.model import ActorNet, CriticV
+from drl.model import ActorPPO, CriticV
 from drl.policy import PPOPolicy as Policy
 from drl.buffer import ReplayBuffer as Buffer
 
-env_name = 'CartPole-v0'
+env_name = 'Pendulum-v0'
 env = gym.make(env_name)
 env = env.unwrapped
 env.seed(1)
@@ -14,19 +14,20 @@ torch.manual_seed(1)
 
 #Parameters
 state_space = env.observation_space.shape[0]
-action_space = env.action_space.n
+action_space = env.action_space.shape[0]
+action_max = env.action_space.high[0]
 
-hidden_dim = 32
-episodes = 10000
+hidden_dim = 100
+episodes = 5000
 max_step = 200
-buffer_size = 2000
+buffer_size = 32
 actor_learn_freq = 1
 target_update_freq = 0
-batch_size = 300
+batch_size = 100
 model_save_dir = './save/test_ppo'
 os.makedirs(model_save_dir, exist_ok=True)
 
-actor = ActorNet(state_space, hidden_dim, action_space)
+actor = ActorPPO(state_space, hidden_dim, action_space)
 critic = CriticV(state_space, hidden_dim, action_space)
 buffer = Buffer(buffer_size, replay=False)
 policy = Policy(actor, critic, buffer, actor_learn_freq=actor_learn_freq, target_update_freq=target_update_freq, batch_size=batch_size)
@@ -77,7 +78,7 @@ def main():
             live_time.append(step)
             # print ('----------END EPS----------')
             plot(live_time, 'Training_PPO_TwoNet_Double', model_save_dir)
-            loss_actor_avg, loss_critic_avg = policy.learn()
+            # loss_actor_avg, loss_critic_avg = policy.learn()
             # print (f'Learing Eps:{i_eps}, Actor_Loss:{round(loss_actor_avg, 3)}, Critic_Loss:{round(loss_critic_avg, 3)}')
 
         policy.save_model(model_save_dir, save_file)
