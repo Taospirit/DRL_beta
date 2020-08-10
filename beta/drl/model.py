@@ -49,22 +49,20 @@ class ActorDPG(nn.Module):
         action = self.net(state)
         return action
 
+# PPO
 class ActorPPO(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.mu_head = nn.Linear(hidden_dim, 1)
         self.sigma_head = nn.Linear(hidden_dim, 1)
 
     def forward(self, state):
-        x = F.leaky_relu(self.fc1(state))
-        x = F.leaky_relu(self.fc2(x))
-        mu = self.mu_head(x)
-        sigma = self.sigma_head(x)
-
+        x = F.relu(self.fc1(state))
+        mu = 2.0 * torch.tanh(self.mu_head(x)) # test for gym_env: 'Pendulum-v0'
+        sigma = F.softplus(self.sigma_head(x))
         return mu, sigma
-
+ 
 class CriticV(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super().__init__()
