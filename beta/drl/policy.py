@@ -257,9 +257,10 @@ class DDPGPolicy(BasePolicy):
         state = torch.tensor(state, dtype=torch.float32, device=self.device)
         if test:
             self.actor_eval.eval()
-
         action = self.actor_eval(state) # out = tanh(x)
-        return action.cpu().data.numpy()
+        action = action.clamp(-1, 1)
+
+        return action.item()
 
     def learn(self):
 
