@@ -75,14 +75,13 @@ class BasePolicy(ABC):
         assert len(rewards) == len(v_evals), 'V_pred length must equal rewards length'
 
         rew_len = len(rewards)
-        masks = np.ones(rew_len) if not masks is None else masks
+        masks = np.ones(rew_len) if masks is None else masks # nonterminal
         v_evals = np.append(v_evals, next_v_eval)
         adv_gae = np.empty(rew_len, 'float32')
-        lastgaelam = 0
+        last_gae = 0
         for i in reversed(range(rew_len)):
-            nonterminal = masks[i]
-            delta = rewards[i] + gamma * v_evals[i+1] * nonterminal - v_evals[i]
-            adv_gae[i] = lastgaelam = delta + gamma * lam * nonterminal * lastgaelam
+            delta = rewards[i] + gamma * v_evals[i+1] * masks[i] - v_evals[i]
+            adv_gae[i] = last_gae = delta + gamma * lam * masks[i] * last_gae
 
         return adv_gae
 
@@ -113,9 +112,9 @@ class A2CPolicy(BasePolicy): #option: double
         self._gamma = discount_factor
         self._target = target_update_freq > 0
         self._sync_cnt = 0
-        self._learn_cnt = 0
-        # self._learn_critic_cnt = 0
-        # self._learn_actor_cnt = 0
+        # self._learn_cnt = 0
+        self._learn_critic_cnt = 0
+        self._learn_actor_cnt = 0
         self._verbose = verbose
         self.buffer = buffer
         assert not buffer.allow_replay, 'PPO buffer cannot be replay buffer'
@@ -175,35 +174,28 @@ class A2CPolicy(BasePolicy): #option: double
         self.critic_eval_optim.zero_grad()
         critic_loss.backward()
         self.critic_eval_optim.step()
-        self._learn_cnt += 1
+        self._learn_critic_cnt += 1
 
-        if self._learn_cnt % self.actor_learn_freq == 0:
+        if self._learn_critic_cnt % self.actor_learn_freq == 0:
             # actor_core
             actor_loss = (-Log * advantage).sum()
             self.actor_eval.train()
             self.actor_eval_optim.zero_grad()
             actor_loss.backward()
             self.actor_eval_optim.step()
+            self._learn_actor_cnt += 1
 
         if self._target:
-            if self._learn_cnt % self.target_update_freq == 0:
+            if self._learn_critic_cnt % self.target_update_freq == 0:
                 if self._verbose: print (f'=======Soft_sync_weight of AC=======')
                 self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
                 self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
+                self._sync_cnt += 1
         
         self.buffer.clear()
         assert self.buffer.is_empty()
 
-        # self.save_data = {'log_probs':[], 'values':[], 'rewards':[], 'masks': []}
-
     def process(self, **kwargs):
-        # reward, done = kwargs['r'], kwargs['d']
-
-        # mask = 0 if done else 1
-        # reward = torch.tensor(reward, dtype=torch.float32)
-        # mask = torch.tensor(mask, dtype=torch.float32)
-        # self.save_data['rewards'].append(reward)
-        # self.save_data['masks'].append(mask)
         self.buffer.append(**kwargs)
 
 
@@ -233,9 +225,9 @@ class DDPGPolicy(BasePolicy):
         self._target = target_update_freq > 0
         self._update_iteration = 10
         self._sync_cnt = 0
-        self._learn_cnt = 0
-        # self._learn_critic_cnt = 0
-        # self._learn_actor_cnt = 0
+        # self._learn_cnt = 0
+        self._learn_critic_cnt = 0
+        self._learn_actor_cnt = 0
         self._verbose = verbose
         self._batch_size = batch_size
         self.replay_buffer = buffer
@@ -270,9 +262,9 @@ class DDPGPolicy(BasePolicy):
         return action.cpu().data.numpy()
 
     def learn(self):
+
         loss_actor_avg = 0
         loss_critic_avg = 0
-        actor_cnt = 0
 
         for _ in range(self._update_iteration):
             memory_batch = self.replay_buffer.random_sample(self._batch_size)
@@ -281,7 +273,6 @@ class DDPGPolicy(BasePolicy):
             S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device) # [batch_size, S.feature_size]
             A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device)
             S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=self.device)
-            # d = torch.tensor(done, dtype=torch.float32, device=self.device) # ?
             R = torch.tensor(batch_split['r'], dtype=torch.float32, device=self.device).unsqueeze(-1)
 
             with torch.no_grad():
@@ -297,25 +288,25 @@ class DDPGPolicy(BasePolicy):
             self.critic_eval_optim.zero_grad()
             critic_loss.backward()
             self.critic_eval_optim.step()
-            self._learn_cnt += 1
+            self._learn_critic_cnt += 1
 
-            if self._learn_cnt % self.actor_learn_freq == 0:
+            if self._learn_critic_cnt % self.actor_learn_freq == 0:
                 actor_loss = -self.critic_eval(S, self.actor_eval(S)).mean()
                 loss_actor_avg += actor_loss.item()
 
                 self.actor_eval_optim.zero_grad()
                 actor_loss.backward()
                 self.actor_eval_optim.step()
-                actor_cnt += 1
+                self._learn_actor_cnt += 1
                 if self._verbose: print (f'=======Learn_Actort_Net=======')
 
             if self._target:
-                if self._learn_cnt % self.target_update_freq == 0:
+                if self._learn_critic_cnt % self.target_update_freq == 0:
                     if self._verbose: print (f'=======Soft_sync_weight of DDPG=======')
                     self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
                     self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
         
-        loss_actor_avg /= actor_cnt
+        loss_actor_avg /= (self._update_iteration/self.actor_learn_freq)
         loss_critic_avg /= self._update_iteration
 
         return loss_actor_avg, loss_critic_avg
@@ -345,7 +336,9 @@ class PPOPolicy(BasePolicy): #option: double
         self.ratio_clip = 0.2
         self.lam_entropy = 0.01
         self.adv_norm = True
-        self.rew_norm = False
+        self.rew_norm = True
+        self.schedule_clip = False
+        self.schedule_adam = False
 
         self.next_state = None
         self.actor_learn_freq = actor_learn_freq
@@ -355,7 +348,6 @@ class PPOPolicy(BasePolicy): #option: double
         self._update_iteration = 10
         self._sync_cnt = 0
         # self._learn_cnt = 0
-
         self._learn_critic_cnt = 0
         self._learn_actor_cnt = 0
 
@@ -411,7 +403,7 @@ class PPOPolicy(BasePolicy): #option: double
             np.random.shuffle(indices)
             return [indices[i: i + batch_size] for i in range(0, buffer_size, batch_size)]
 
-    def learn(self):
+    def learn(self, i_episode=0, num_episode=100):
         if not self.buffer.is_full(): 
             print (f'Waiting for a full buffer: {len(self.buffer)}\{self.buffer.capacity()} ', end='\r')
             return 0, 0
@@ -486,6 +478,20 @@ class PPOPolicy(BasePolicy): #option: double
     
         self.buffer.clear()
         assert self.buffer.is_empty()
+
+        # update param
+        ep_ratio = 1 - (i_episode / num_episode)
+        if self.schedule_clip:
+            self.ratio_clip = 0.2 * ep_ratio
+
+        if self.schedule_adam:
+            new_lr = self.lr * ep_ratio
+            # set learning rate
+            # ref: https://stackoverflow.com/questions/48324152/
+            for g in self.actor_eval_optim.param_groups:
+                g['lr'] = new_lr
+            for g in self.critic_eval_optim.param_groups:
+                g['lr'] = new_lr
 
         print (f'critic_cnt {self._learn_critic_cnt}, actor_cnt {self._learn_actor_cnt}')
         loss_actor_avg /= (self._update_iteration/self.actor_learn_freq)
