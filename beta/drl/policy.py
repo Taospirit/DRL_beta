@@ -7,8 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Categorical, Normal
-from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-
+# from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 from abc import ABC, abstractmethod
 
@@ -337,7 +336,7 @@ class PPOPolicy(BasePolicy): #option: double
         self.ratio_clip = 0.2
         self.lam_entropy = 0.01
         self.adv_norm = True
-        self.rew_norm = True
+        self.rew_norm = False
         self.schedule_clip = False
         self.schedule_adam = False
 
@@ -430,8 +429,6 @@ class PPOPolicy(BasePolicy): #option: double
         adv_gae_td = self.GAE(rewards, v_evals, next_v_eval=end_v_eval, gamma=self._gamma, lam=0) # td_error adv
         advantage = torch.from_numpy(adv_gae_td).to(self.device).unsqueeze(-1)
         advantage = self._normalized(advantage, 1e-10) if self.adv_norm else advantage
-
-        # print (f'adv {advantage}, size {advantage.size()}')
 
         # indices = [i for i in range(len(self.buffer))]
         for _ in range(self._update_iteration):
