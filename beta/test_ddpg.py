@@ -4,7 +4,7 @@ import torch
 
 from drl.model import ActorDPG, CriticQ
 from drl.policy import DDPGPolicy as Policy
-from drl.buffer import ReplayBuffer as Buffer
+from drl.utils import ReplayBuffer as Buffer
 
 env_name = 'Pendulum-v0'
 env = gym.make(env_name)
@@ -72,8 +72,8 @@ def sample(env, policy, max_step, test=False):
 
     for step in range(max_step):
         action = policy.choose_action(state, test)
-        action = action.clip(-1, 1) * env.action_space.high[0]
-        next_state, reward, done, info = env.step(action)
+        action *= env.action_space.high[0]
+        next_state, reward, done, info = env.step([action])
         env.render()
         # process env callback
         if not test:

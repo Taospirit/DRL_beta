@@ -4,7 +4,7 @@ import torch
 
 from drl.model import ActorNet, CriticV
 from drl.policy import A2CPolicy as Policy
-from drl.buffer import ReplayBuffer as Buffer
+from drl.utils import ReplayBuffer as Buffer
 
 env_name = 'CartPole-v0'
 env = gym.make(env_name)
