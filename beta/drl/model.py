@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.distributions import Categorical
+from torch.distributions import Categorical, Normal
 
 class ActorCriticNet(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
@@ -51,28 +51,47 @@ class ActorDPG(nn.Module):
 
 # PPO
 class ActorPPO(nn.Module):
-    def __init__(self, state_dim, hidden_dim, action_dim):
+    def __init__(self, state_dim, hidden_dim, action_dim, layer_norm=False):
         super().__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.mu_head = nn.Linear(hidden_dim, 1)
         self.sigma_head = nn.Linear(hidden_dim, 1)
+        if layer_norm:
+            self.layer_norm(self.fc1, std=1.0)
+            self.layer_norm(self.mu_head, std=1.0)
+            self.layer_norm(self.sigma_head, std=1.0)
 
     def forward(self, state):
-        x = F.relu(self.fc1(state))
+        x = torch.tanh(self.fc1(state))
+        # x = F.relu(self.fc1(state))
         mu = 2.0 * torch.tanh(self.mu_head(x)) # test for gym_env: 'Pendulum-v0'
         sigma = F.softplus(self.sigma_head(x))
         return mu, sigma
- 
+    
+    @staticmethod
+    def layer_norm(layer, std=1.0, bias_const=0.0):
+        torch.nn.init.orthogonal_(layer.weight, std)
+        torch.nn.init.constant_(layer.bias, bias_const)
+
 class CriticV(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim):
+    def __init__(self, input_dim, hidden_dim, output_dim, layer_norm=False):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.value_head = nn.Linear(hidden_dim, 1)
+        if layer_norm:
+            self.layer_norm(self.fc1, std=1.0)
+            self.layer_norm(self.value_head, std=1.0)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
         state_value = self.value_head(x)
         return state_value
+
+    @staticmethod
+    def layer_norm(layer, std=1.0, bias_const=0.0):
+        torch.nn.init.orthogonal_(layer.weight, std)
+        torch.nn.init.constant_(layer.bias, bias_const)
+
 
 class CriticQ(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
