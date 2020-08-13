@@ -1,0 +1,51 @@
+env: Pendulum-v0 
+state_space: 3, action_space: 1
+episodes: 1300, max_step: 200
+===============================
+lr: 0.0001 
+eps: 1.1920928955078125e-07 
+tau: 0.005 
+ratio_clip: 0.2 
+lam_entropy: 0.01 
+adv_norm: True 
+rew_norm: False 
+next_state: None 
+actor_learn_freq: 1 
+target_update_freq: 0 
+_gamma: 0.99 
+_target: False 
+_update_iteration: 10 
+_sync_cnt: 0 
+_learn_critic_cnt: 0 
+_learn_actor_cnt: 0 
+_verbose: False 
+_batch_size: 100 
+buffer: <drl.buffer.ReplayBuffer object at 0x7f55eb5b8ac8> 
+_normalized: <function PPOPolicy.__init__.<locals>.<lambda> at 0x7f55eb4bc048> 
+device: cuda 
+actor_eval: ActorPPO(
+  (fc1): Linear(in_features=3, out_features=100, bias=True)
+  (mu_head): Linear(in_features=100, out_features=1, bias=True)
+  (sigma_head): Linear(in_features=100, out_features=1, bias=True)
+) 
+critic_eval: CriticV(
+  (fc1): Linear(in_features=3, out_features=100, bias=True)
+  (value_head): Linear(in_features=100, out_features=1, bias=True)
+) 
+actor_eval_optim: Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    eps: 1e-08
+    lr: 0.0001
+    weight_decay: 0
+) 
+critic_eval_optim: Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    eps: 1e-08
+    lr: 0.0001
+    weight_decay: 0
+) 
+criterion: SmoothL1Loss() 
