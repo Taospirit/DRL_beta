@@ -77,7 +77,7 @@ class CriticV(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, layer_norm=False):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.value_head = nn.Linear(hidden_dim, 1)
+        self.value_head = nn.Linear(hidden_dim, output_dim)
         if layer_norm:
             self.layer_norm(self.fc1, std=1.0)
             self.layer_norm(self.value_head, std=1.0)

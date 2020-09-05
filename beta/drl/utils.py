@@ -15,7 +15,7 @@ class ReplayBuffer(object):
 
     def append(self, **kwargs):
         if not self.allow_replay and self.is_full():
-            return 
+            return
         # memory_tuple = Batch(**kwargs)
         memory_tuple = kwargs
         if len(self.memory) < self._maxsize:
@@ -26,10 +26,10 @@ class ReplayBuffer(object):
     def random_sample(self, batch_size):
         return random.sample(self.memory, min(batch_size, len(self.memory)))
 
-    def clear(self):
+    def clear(self): # manual clear
         self.memory = []
         self.append_index = 0
-        print (f'----------Clear buffer size of {self._maxsize}!----------') 
+        # print (f'----------Clear buffer size of {self._maxsize}!----------') 
 
     def show(self):
         print (self.memory)
@@ -41,6 +41,9 @@ class ReplayBuffer(object):
             split_res[key] = values
 
         return split_res
+
+    def split_batch(self, batch_size):
+        return self.split(self.random_sample(batch_size))
 
     def is_full(self):
         return len(self.memory) == self._maxsize
@@ -57,7 +60,6 @@ class ReplayBuffer(object):
         return self.memory
 
 class Batch(object):
-
     def __init__(self, **kwargs):
         super().__init__()
         # print (kwargs)

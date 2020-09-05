@@ -10,6 +10,8 @@ from torch.distributions import Categorical, Normal
 # from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 from abc import ABC, abstractmethod
+from drl.utils import ReplayBuffer
+# import untils
 
 class BasePolicy(ABC):
     def __init__(self, **kwargs):
@@ -90,7 +92,7 @@ class A2CPolicy(BasePolicy): #option: double
         self, 
         actor_net, 
         critic_net,
-        buffer=None,
+        buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
         target_update_tau=5e-3,
@@ -105,7 +107,6 @@ class A2CPolicy(BasePolicy): #option: double
         self.tau = target_update_tau
         self.gae_lamda = gae_lamda
 
-        self.next_state = None
         self.actor_learn_freq = actor_learn_freq
         self.target_update_freq = target_update_freq
         self._gamma = discount_factor
@@ -115,8 +116,8 @@ class A2CPolicy(BasePolicy): #option: double
         self._learn_critic_cnt = 0
         self._learn_actor_cnt = 0
         self._verbose = verbose
-        self.buffer = buffer
-        assert not buffer.allow_replay, 'PPO buffer cannot be replay buffer'
+        self.buffer = ReplayBuffer(buffer_size, replay=False)
+        # assert not self.buffer.allow_replay, 'PPO buffer cannot be replay buffer'
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.actor_eval = actor_net.to(self.device)
@@ -142,7 +143,7 @@ class A2CPolicy(BasePolicy): #option: double
         state = torch.tensor(state, dtype=torch.float32, device=self.device)
         if test:
             self.actor_eval.eval()
-            return Categorical(self.actor_eval(state)).sample().item()
+            return Categorical(self.actor_eval(state)).sample().item(), 0
         
         dist = self.actor_eval(state)
         m = Categorical(dist)
@@ -164,7 +165,7 @@ class A2CPolicy(BasePolicy): #option: double
         v_evals = v_eval.detach().cpu().numpy()
         rewards = R.numpy()
         masks = M.numpy()
-        adv_gae_mc = self.GAE(rewards, v_evals, next_v_eval=0, masks=masks, gamma=self._gamma, lam=1) # MC adv
+        adv_gae_mc = self.GAE(rewards, v_evals, next_v_eval=0, masks=masks, gamma=self._gamma, lam=self.gae_lamda) # MC adv
         advantage = torch.from_numpy(adv_gae_mc).to(self.device).reshape(-1, 1)
 
         v_target = advantage + v_eval.detach()
@@ -203,7 +204,7 @@ class DDPGPolicy(BasePolicy):
         self, 
         actor_net, 
         critic_net, 
-        buffer,
+        buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
         target_update_tau=5e-3,
@@ -217,7 +218,6 @@ class DDPGPolicy(BasePolicy):
         self.eps = np.finfo(np.float32).eps.item()
         self.tau = target_update_tau
 
-        self.next_state = None
         self.actor_learn_freq = actor_learn_freq
         self.target_update_freq = target_update_freq
         self._gamma = discount_factor
@@ -229,8 +229,8 @@ class DDPGPolicy(BasePolicy):
         self._learn_actor_cnt = 0
         self._verbose = verbose
         self._batch_size = batch_size
-        self.replay_buffer = buffer
-        assert buffer.allow_replay, 'DDPG buffer must be replay buffer'
+        self.replay_buffer = ReplayBuffer(buffer_size)
+        # assert buffer.allow_replay, 'DDPG buffer must be replay buffer'
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.actor_eval = actor_net.to(self.device) # pi(s)
@@ -271,7 +271,7 @@ class DDPGPolicy(BasePolicy):
             batch_split = self.replay_buffer.split(memory_batch)
             
             S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device) # [batch_size, S.feature_size]
-            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device)
+            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).unsqueeze(-1) # [batch_size, 1]
             S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=self.device)
             R = torch.tensor(batch_split['r'], dtype=torch.float32, device=self.device).unsqueeze(-1)
 
@@ -280,7 +280,7 @@ class DDPGPolicy(BasePolicy):
                 if self._target:
                     q_target = self.critic_target(S_, self.actor_target(S_))
                 q_target = R + self._gamma * q_target
-
+            print (f'SIZE S {S.size()}, A {A.size()}, S_ {S_.size()}, R {R.size()}')
             q_eval = self.critic_eval(S, A) # [batch_size, q_value_size]
             critic_loss = self.criterion(q_eval, q_target)
             loss_critic_avg += critic_loss.item()
@@ -320,7 +320,7 @@ class PPOPolicy(BasePolicy): #option: double
         self, 
         actor_net, 
         critic_net, 
-        buffer,
+        buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
         target_update_tau=5e-3,
@@ -340,7 +340,6 @@ class PPOPolicy(BasePolicy): #option: double
         self.schedule_clip = False
         self.schedule_adam = False
 
-        self.next_state = None
         self.actor_learn_freq = actor_learn_freq
         self.target_update_freq = target_update_freq
         self._gamma = discount_factor
@@ -353,8 +352,8 @@ class PPOPolicy(BasePolicy): #option: double
 
         self._verbose = verbose
         self._batch_size = batch_size
-        self.buffer = buffer
-        assert not buffer.allow_replay, 'PPO buffer cannot be replay buffer'
+        self.buffer = ReplayBuffer(buffer_size, replay=False)
+        # assert not self.buffer.allow_replay, 'PPO buffer cannot be replay buffer'
         self._normalized=lambda x, e: (x - x.mean()) / (x.std() + e)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
