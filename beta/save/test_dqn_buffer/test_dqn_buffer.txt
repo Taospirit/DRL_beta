@@ -1,0 +1,36 @@
+env: CartPole-v0 
+state_space: 4, action_space: 2
+episodes: 1000, max_step: 1000
+===============================
+lr: 0.01 
+device: cuda 
+eps: 1.1920928955078125e-07 
+tau: 1 
+epsilon: 0.5 
+target_update_freq: 100 
+_gamma: 0.99 
+_batch_size: 100 
+_verbose: False 
+_update_iteration: 10 
+_learn_cnt: 0 
+replay_buffer: <drl.utils.ReplayBuffer object at 0x7f18ad205a20> 
+rew_norm: True 
+critic_eval: CriticV(
+  (fc1): Linear(in_features=4, out_features=32, bias=True)
+  (value_head): Linear(in_features=32, out_features=2, bias=True)
+) 
+critic_target: CriticV(
+  (fc1): Linear(in_features=4, out_features=32, bias=True)
+  (value_head): Linear(in_features=32, out_features=2, bias=True)
+) 
+q_eval_optim: Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    eps: 1e-08
+    lr: 0.01
+    weight_decay: 0
+) 
+criterion: MSELoss() 
+random_choose: 0 
+sum_choose: 0 
