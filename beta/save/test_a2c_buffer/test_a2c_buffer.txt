@@ -2,20 +2,19 @@ env: CartPole-v0
 state_space: 4, action_space: 2
 episodes: 300, max_step: 1000
 ===============================
+buffer: <drl.utils.ReplayBuffer object at 0x7f7631031be0> 
 lr: 0.01 
 eps: 1.1920928955078125e-07 
 tau: 0.005 
-gae_lamda: 1 
-save_data: {'log_probs': [], 'values': [], 'rewards': [], 'masks': []} 
-next_state: None 
 actor_learn_freq: 1 
 target_update_freq: 0 
 _gamma: 0.99 
+_gae_lamda: 1 
 _target: False 
 _sync_cnt: 0 
-_learn_cnt: 0 
+_learn_critic_cnt: 0 
+_learn_actor_cnt: 0 
 _verbose: False 
-buffer: <drl.buffer.ReplayBuffer object at 0x7fb7e04adc18> 
 device: cuda 
 actor_eval: ActorNet(
   (fc1): Linear(in_features=4, out_features=32, bias=True)
