@@ -63,13 +63,8 @@ class PPO(BasePolicy): #option: double
         self.critic_eval.train()
 
         if self._target:
-            self.actor_target = deepcopy(self.actor_eval)
-            self.critic_target = deepcopy(self.critic_eval)
-            self.actor_target.load_state_dict(self.actor_eval.state_dict())
-            self.critic_target.load_state_dict(self.critic_eval.state_dict())
-
-            self.actor_target.eval()
-            self.critic_target.eval()
+            self.actor_target = self.copy_net(self.actor_eval)
+            self.critic_target = self.copy_net(self.critic_eval)
 
         self.criterion = nn.SmoothL1Loss()
 

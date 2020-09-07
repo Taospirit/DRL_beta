@@ -42,8 +42,7 @@ class DQN(BasePolicy): # navie DQN
         self.buffer = ReplayBuffer(buffer_size)
         
         self.critic_eval = critic_net.to(self.device)
-        self.critic_target = deepcopy(self.critic_eval)
-        self.critic_target.load_state_dict(self.critic_eval.state_dict())
+        self.critic_target = self.copy_net(self.critic_eval)
         
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
         self.critic_eval.train()

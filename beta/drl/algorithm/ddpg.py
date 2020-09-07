@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-# from torch.distributions import Categorical
 
 from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
@@ -19,11 +18,12 @@ class DDPG(BasePolicy):
         buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
-        target_update_tau=5e-3,
+        target_update_tau=1,
         learning_rate=0.01,
         discount_factor=0.99,
         batch_size=100,
-        verbose = False
+        verbose=False,
+        action_max=1
         ):
         super().__init__()
         self.lr = learning_rate
@@ -42,8 +42,8 @@ class DDPG(BasePolicy):
         self._verbose = verbose
         self._batch_size = batch_size
         self.buffer = ReplayBuffer(buffer_size)
-
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         self.actor_eval = actor_net.to(self.device) # pi(s)
         self.critic_eval = critic_net.to(self.device) # Q(s, a)
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
@@ -53,45 +53,36 @@ class DDPG(BasePolicy):
         self.critic_eval.train()
 
         if self._target:
-            self.actor_target = deepcopy(self.actor_eval)
-            self.critic_target = deepcopy(self.critic_eval)
-            self.actor_target.load_state_dict(self.actor_eval.state_dict())
-            self.critic_target.load_state_dict(self.critic_eval.state_dict())
-
-            self.actor_target.eval()
-            self.critic_target.eval()
+            self.actor_target = self.copy_net(self.actor_eval)
+            self.critic_target = self.copy_net(self.critic_eval)
             
         self.criterion = nn.MSELoss() # why mse?
+        self.action_max = action_max
 
     def choose_action(self, state, test=False):
-        state = torch.tensor(state, dtype=torch.float32, device=self.device)
-        if test:
-            self.actor_eval.eval()
-        action = self.actor_eval(state) # out = tanh(x)
-        action = action.clamp(-1, 1)
-
-        return action.item()
+        if test: self.actor_eval.eval()
+        # action = self.actor_eval(state) # out = tanh(x)
+        # action = action.clamp(-self.action_max, self.action_max)
+        # return action.item()
+        return self.actor_eval.predict(state, self.action_max).item()
 
     def learn(self):
-
-        loss_actor_avg = 0
-        loss_critic_avg = 0
+        loss_actor_avg, loss_critic_avg = 0, 0
 
         for _ in range(self._update_iteration):
-            # memory_batch = self.buffer.random_sample(self._batch_size)
-            # batch_split = self.buffer.split(memory_batch)
-
             batch_split = self.buffer.split_batch(self._batch_size)
             S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device) # [batch_size, S.feature_size]
-            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).unsqueeze(-1) # [batch_size, 1]
+            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).view(-1, 1) # [batch_size, 1]
+            M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
+            R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
             S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=self.device)
-            R = torch.tensor(batch_split['r'], dtype=torch.float32, device=self.device).unsqueeze(-1)
 
             with torch.no_grad():
-                q_target = self.critic_eval(S_, self.actor_eval(S_))
+                q_next = self.critic_eval(S_, self.actor_eval(S_))
                 if self._target:
-                    q_target = self.critic_target(S_, self.actor_target(S_))
-                q_target = R + self._gamma * q_target
+                    q_next = self.critic_target(S_, self.actor_target(S_))
+                q_target = R + M * self._gamma * q_next.cpu()
+                q_target = q_target.to(self.device)
             # print (f'SIZE S {S.size()}, A {A.size()}')
             q_eval = self.critic_eval(S, A) # [batch_size, q_value_size]
             critic_loss = self.criterion(q_eval, q_target)
@@ -120,5 +111,4 @@ class DDPG(BasePolicy):
         
         loss_actor_avg /= (self._update_iteration/self.actor_learn_freq)
         loss_critic_avg /= self._update_iteration
-
         return loss_actor_avg, loss_critic_avg

@@ -7,10 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Categorical, Normal
-
 from abc import ABC, abstractmethod
-# from drl.utils import ReplayBuffer
-# import untils
 
 class BasePolicy(ABC):
     def __init__(self, **kwargs):
@@ -19,34 +16,33 @@ class BasePolicy(ABC):
     
     @abstractmethod
     def choose_action(self, state, **kwargs):
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def learn(self):
-        pass
+        raise NotImplementedError
 
     def process(self, **kwargs):
         self.buffer.append(**kwargs)
+
+    def copy_net(self, model):
+        model_ = deepcopy(model)
+        model_.load_state_dict(model.state_dict())
+        return model_.eval()
     
     def save_model(self, save_dir, save_file_name, save_actor=False, save_critic=False):
         assert isinstance(save_dir, str) and isinstance(save_file_name, str)
         os.makedirs(save_dir, exist_ok=True)
-
         save_path = os.path.join(save_dir, save_file_name)
         actor_save = save_path + '_actor.pth'
         critic_save = save_path + '_critic.pth'
-        # assert not only_actor or not only_critic
+
         if save_actor:
             torch.save(self.actor_eval.state_dict(), actor_save)
             print (f'Save actor model in {actor_save}')
-            # return
         if save_critic:
             torch.save(self.critic_eval.state_dict(), critic_save)
             print (f'Save critic model in {critic_save}')
-        #     return
-        # torch.save(self.actor_eval.state_dict(), actor_save)
-        # torch.save(self.critic_eval.state_dict(), critic_save)
-        # print (f'Save actor-critic model in {save_path}!')
 
     def load_model(self, save_dir, save_file_name, load_actor=False, load_critic=False):
         save_path = os.path.join(save_dir, save_file_name)
@@ -77,8 +73,6 @@ class BasePolicy(ABC):
         :param lam: (float) GAE factor
         : GAE(lam=0) = td_error; GAE(lam=1) = MC
         '''
-        # GAE(gamma, lam=0) = td_error
-        # GAE(gamma, lam=1) = MC
         assert isinstance(rewards, np.ndarray), 'rewards must be np.ndarray'
         assert isinstance(v_evals, np.ndarray), 'v_evals must be np.ndarray'
         assert len(rewards) == len(v_evals), 'V_pred length must equal rewards length'

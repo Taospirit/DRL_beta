@@ -11,6 +11,7 @@ from torch.distributions import Categorical
 from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 
+#TODO:
 class Rainbow(BasePolicy): #option: double(done), dueling(todo), noisy(todo), n-step(todo), 
     def __init__(
         self, 
@@ -74,7 +75,6 @@ class Rainbow(BasePolicy): #option: double(done), dueling(todo), noisy(todo), n-
 
     def learn(self):
         for _ in range(self._update_iteration):
-            
             batch_split = self.buffer.split_batch(self._batch_size) # s, a, r, s_
             S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device)
             A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).view(-1, 1)
