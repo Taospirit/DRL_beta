@@ -5,3 +5,4 @@ a deep reinforcement learning implement
 |2020-7-11|INIT|-|-|
 |2020-8-3|add A2C/DDPG|-|-|
 |2020-8-4|add GAE | add PP0 & SAC|-|
+|2020-9-7|add PPO/TD3/DQN | add Rainbow & SAC |-|
