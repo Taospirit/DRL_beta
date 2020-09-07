@@ -59,6 +59,59 @@ class ReplayBuffer(object):
     def all_memory(self):
         return self.memory
 
+class PriorityReplayBuffer(ReplayBuffer):
+    def __init__(self):
+        super().__init__()
+    
+    def append(self, **kwargs):
+        pass
+
+class SegmentTree():
+    def __init__(self, size):
+        self.index = 0
+        self._size = size
+        self.sum_tree = np.zeros((2 * size - 1, ), dtype=np.float32)
+        self.data = np.array([None] * size)
+        self.max = 1
+
+    def _propagate(self, index):
+        p = (index - 1) // 2
+        l, r = 2 * p + 1, 2 * p + 2
+        self.sum_tree[p] = self.sum_tree[l] + self.sum_tree[r]
+        if p != 0:
+            self._propagate(p)
+
+    def _retrieve(self, index, value):
+        l, r = 2 * index + 1, 2 * index + 2
+        if l >= len(self.sum_tree):
+            return index
+        elif value <= self.sum_tree[l]:
+            return self._retrieve(l, value)
+        else:
+            return self._retrieve(r, value - self.sum_tree[l])
+
+    def append(self, data, value):
+        self.data[self.index] = data # sefl.data store data
+        # self.update(self.index + self._size - 1, value)
+        tree_index = self.index + self._size - 1
+        self.sum_tree[tree_index] = value # self.sum_tree store value
+        self._propagate(tree_index)
+        # self.max = max(value, self.max)
+        self.index = (self.index + 1) % self._sizem
+        self.full = self.full or self.index == 0 # ?
+        self.max = max(value, self.max)
+
+    def find(self, value):
+        index = self._retrieve(0, value)
+        data_index = index - self.size + 1
+        return self.sum_tree[index], data_index, index
+
+    def get(self, data_index):
+        return self.data[data_index % self._size]
+
+    def total(self):
+        return self.sum_tree[0]
+
 class Batch(object):
     def __init__(self, **kwargs):
         super().__init__()
@@ -106,11 +159,6 @@ class RunningStat(object):
         return self._M.shape
 
 class ZFilter:
-    """
-    y = (x-mean)/std
-    using running estimates of mean,std
-    """
-
     def __init__(self, shape, demean=True, destd=True, clip=10.0):
         self.demean = demean
         self.destd = destd
