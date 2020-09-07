@@ -37,16 +37,28 @@ class ActorNet(nn.Module):
         dist = F.softmax(action_score, dim=-1)
         return dist
 
-# DDPG
+# DDPG & TD3
 class ActorDPG(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
         self.net = nn.Sequential(nn.Linear(state_dim, hidden_dim), nn.ReLU(),
                                  nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
                                  nn.Linear(hidden_dim, action_dim), nn.Tanh(), )
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    def forward(self, state, noise_std=0.0):
+    def forward(self, state):
+        state = torch.tensor(state, dtype=torch.float32, device=self.device)
         action = self.net(state)
+        return action
+
+    def predict(self, state, action_max, noise_std=0, noise_clip=0.5):
+        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        action = self.net(state)
+        if noise_std:
+            noise_norm = torch.ones_like(action).data.normal_(0, noise_std).to(self.device)
+            action += noise_norm.clamp(-noise_clip, noise_clip)
+
+        action = action.clamp(-action_max, action_max)
         return action
 
 # PPO
