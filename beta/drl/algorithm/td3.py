@@ -10,11 +10,12 @@ import torch.nn.functional as F
 from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 
+
 class TD3(BasePolicy):
     def __init__(
-        self, 
-        actor_net, 
-        critic_net, 
+        self,
+        actor_net,
+        critic_net,
         buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=1,
@@ -24,7 +25,7 @@ class TD3(BasePolicy):
         batch_size=100,
         verbose=False,
         action_max=1
-        ):
+    ):
         super().__init__()
         self.lr = learning_rate
         self.eps = np.finfo(np.float32).eps.item()
@@ -45,7 +46,7 @@ class TD3(BasePolicy):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.actor_eval = actor_net.to(self.device)
-        self.critic_1 = critic_net.to(self.device) # two Q net
+        self.critic_1 = critic_net.to(self.device)  # two Q net
         self.critic_2 = deepcopy(critic_net).to(self.device)
 
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
@@ -55,19 +56,20 @@ class TD3(BasePolicy):
         self.actor_eval.train()
         self.critic_1.train()
         self.critic_2.train()
-        
+
         self.actor_target = self.copy_net(self.actor_eval)
         self.critic_1_target = self.copy_net(self.critic_1)
         self.critic_2_target = self.copy_net(self.critic_2)
 
-        self.criterion = nn.MSELoss() # why mse?
+        self.criterion = nn.MSELoss()  # why mse?
 
         self.noise_clip = 0.5
         self.noise_std = 0.2
         self.action_max = action_max
 
     def choose_action(self, state, test=False):
-        if test: self.actor_eval.eval()
+        if test:
+            self.actor_eval.eval()
         # action = self.actor_eval(state) # out = tanh(x)
         # action = action.clamp(-self.action_max, self.action_max)
         # return action.item()
@@ -78,7 +80,7 @@ class TD3(BasePolicy):
 
         for _ in range(self._update_iteration):
             batch_split = self.buffer.split_batch(self._batch_size)
-            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device) # [batch_size, S.feature_size]
+            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device)  # [batch_size, S.feature_size]
             A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).view(-1, 1)
             M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
             R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
@@ -91,7 +93,7 @@ class TD3(BasePolicy):
             # A_noise = A_noise.clamp(-self.action_max, self.action_max)
             A_noise = self.actor_target.predict(S_, self.action_max, self.noise_std, self.noise_clip)
             with torch.no_grad():
-                q1_next = self.critic_1_target(S_, A_noise) # add noise
+                q1_next = self.critic_1_target(S_, A_noise)  # add noise
                 q2_next = self.critic_2_target(S_, A_noise)
                 q_next = torch.min(q1_next, q2_next)
                 q_target = R + M * self._gamma * q_next.cpu()
@@ -109,25 +111,27 @@ class TD3(BasePolicy):
             critic_2_loss.backward()
             self.critic_2_optim.step()
 
-            loss_critic_avg += 0.5 * (critic_1_loss.item() + critic_2_loss.item())   
+            loss_critic_avg += 0.5 * (critic_1_loss.item() + critic_2_loss.item())
             self._learn_critic_cnt += 1
 
             if self._learn_critic_cnt % self.actor_learn_freq == 0:
-                actor_loss = -self.critic_1(S, self.actor_eval(S)).mean() # no noise
+                actor_loss = -self.critic_1(S, self.actor_eval(S)).mean()  # no noise
                 loss_actor_avg += actor_loss.item()
 
                 self.actor_eval_optim.zero_grad()
                 actor_loss.backward()
                 self.actor_eval_optim.step()
                 self._learn_actor_cnt += 1
-                if self._verbose: print (f'=======Learn_Actort_Net=======')
+                if self._verbose:
+                    print(f'=======Learn_Actort_Net=======')
 
             if self._learn_critic_cnt % self.target_update_freq == 0:
-                if self._verbose: print (f'=======Soft_sync_weight of DDPG=======')
+                if self._verbose:
+                    print(f'=======Soft_sync_weight of DDPG=======')
                 self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
                 self.soft_sync_weight(self.critic_1_target, self.critic_1, self.tau)
                 self.soft_sync_weight(self.critic_2_target, self.critic_2, self.tau)
-        
+
         loss_actor_avg /= (self._update_iteration/self.actor_learn_freq)
         loss_critic_avg /= self._update_iteration
         return loss_actor_avg, loss_critic_avg

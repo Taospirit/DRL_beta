@@ -11,7 +11,7 @@ from torch.distributions import Categorical
 from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 
-#TODO:
+#TODO:to be complete
 class Rainbow(BasePolicy): #option: double(done), dueling(todo), noisy(todo), n-step(todo), 
     def __init__(
         self, 
@@ -23,8 +23,7 @@ class Rainbow(BasePolicy): #option: double(done), dueling(todo), noisy(todo), n-
         target_update_tau=1,
         learning_rate=0.01,
         discount_factor=0.99,
-        verbose=False,
-        Double=True
+        verbose=False
         ):
         super().__init__()
         self.lr = learning_rate
@@ -32,8 +31,13 @@ class Rainbow(BasePolicy): #option: double(done), dueling(todo), noisy(todo), n-
         self.eps = np.finfo(np.float32).eps.item()
         self.tau = target_update_tau
         self.epsilon = 0.5
-        self.double_q = Double
-
+        # ticks
+        self.double_q = True
+        self.dueling_q = True
+        self.distributional_q = True
+        self.prioritized_replay = True
+        self.noisy_q = True
+        self.n_step_td = True
 
         self.target_update_freq = target_update_freq
         self.action_shape = action_shape
@@ -49,7 +53,8 @@ class Rainbow(BasePolicy): #option: double(done), dueling(todo), noisy(todo), n-
         self.critic_eval = critic_net.to(self.device)
         self.critic_target = deepcopy(self.critic_eval)
         self.critic_target.load_state_dict(self.critic_eval.state_dict())
-        
+        self.critic_eval.use_dueling = self.critic_target.use_dueling = self.dueling_q # Dueling DQN  
+
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
         self.critic_eval.train()
         
@@ -85,12 +90,9 @@ class Rainbow(BasePolicy): #option: double(done), dueling(todo), noisy(todo), n-
             if self.rew_norm: R = self._normalized(R, self.eps)
 
             with torch.no_grad():
-                if self.double_q:
-                    argmax_action = self.critic_eval(S_).max(dim=1, keepdim=True)[1]
-                    q_next = self.critic_target(S_).gather(1, argmax_action.type(torch.long))
-                else:
-                    q_next = self.critic_target(S_).max(dim=1, keepdim=True)[0]
-
+                get_action_net = self.critic_eval if self.double_q else self.critic_target # Double DQN
+                argmax_action = get_action_net(S_).max(dim=1, keepdim=True)[1]
+                q_next = self.critic_target(S_).gather(1, argmax_action.type(torch.long))
                 q_target = R + M * self._gamma * q_next.cpu()
                 q_target = q_target.to(self.device)
                 

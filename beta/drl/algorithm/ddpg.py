@@ -10,11 +10,12 @@ import torch.nn.functional as F
 from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 
+
 class DDPG(BasePolicy):
     def __init__(
-        self, 
-        actor_net, 
-        critic_net, 
+        self,
+        actor_net,
+        critic_net,
         buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
@@ -24,7 +25,7 @@ class DDPG(BasePolicy):
         batch_size=100,
         verbose=False,
         action_max=1
-        ):
+    ):
         super().__init__()
         self.lr = learning_rate
         self.eps = np.finfo(np.float32).eps.item()
@@ -44,23 +45,24 @@ class DDPG(BasePolicy):
         self.buffer = ReplayBuffer(buffer_size)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.actor_eval = actor_net.to(self.device) # pi(s)
-        self.critic_eval = critic_net.to(self.device) # Q(s, a)
+        self.actor_eval = actor_net.to(self.device)  # pi(s)
+        self.critic_eval = critic_net.to(self.device)  # Q(s, a)
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
-        
+
         self.actor_eval.train()
         self.critic_eval.train()
 
         if self._target:
             self.actor_target = self.copy_net(self.actor_eval)
             self.critic_target = self.copy_net(self.critic_eval)
-            
-        self.criterion = nn.MSELoss() # why mse?
+
+        self.criterion = nn.MSELoss()  # why mse?
         self.action_max = action_max
 
     def choose_action(self, state, test=False):
-        if test: self.actor_eval.eval()
+        if test:
+            self.actor_eval.eval()
         # action = self.actor_eval(state) # out = tanh(x)
         # action = action.clamp(-self.action_max, self.action_max)
         # return action.item()
@@ -71,8 +73,8 @@ class DDPG(BasePolicy):
 
         for _ in range(self._update_iteration):
             batch_split = self.buffer.split_batch(self._batch_size)
-            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device) # [batch_size, S.feature_size]
-            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).view(-1, 1) # [batch_size, 1]
+            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device)  # [batch_size, S.feature_size]
+            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).view(-1, 1)  # [batch_size, 1]
             M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
             R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
             S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=self.device)
@@ -84,7 +86,7 @@ class DDPG(BasePolicy):
                 q_target = R + M * self._gamma * q_next.cpu()
                 q_target = q_target.to(self.device)
             # print (f'SIZE S {S.size()}, A {A.size()}')
-            q_eval = self.critic_eval(S, A) # [batch_size, q_value_size]
+            q_eval = self.critic_eval(S, A)  # [batch_size, q_value_size]
             critic_loss = self.criterion(q_eval, q_target)
             loss_critic_avg += critic_loss.item()
 
@@ -101,14 +103,16 @@ class DDPG(BasePolicy):
                 actor_loss.backward()
                 self.actor_eval_optim.step()
                 self._learn_actor_cnt += 1
-                if self._verbose: print (f'=======Learn_Actort_Net=======')
+                if self._verbose:
+                    print(f'=======Learn_Actort_Net=======')
 
             if self._target:
                 if self._learn_critic_cnt % self.target_update_freq == 0:
-                    if self._verbose: print (f'=======Soft_sync_weight of DDPG=======')
+                    if self._verbose:
+                        print(f'=======Soft_sync_weight of DDPG=======')
                     self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
                     self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
-        
+
         loss_actor_avg /= (self._update_iteration/self.actor_learn_freq)
         loss_critic_avg /= self._update_iteration
         return loss_actor_avg, loss_critic_avg
