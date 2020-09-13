@@ -17,7 +17,7 @@ class policy_test():
         RunTime = len(steps)
 
         path = model_save_dir + '/RunTime' + str(RunTime) + '.jpg'
-        if len(steps) % 100 == 0:
+        if len(steps) % 20 == 0:
             plt.savefig(path)
         plt.pause(0.0000001)
     

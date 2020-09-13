@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from itertools import count
 from collections import namedtuple
+from copy import deepcopy
 
 import torch
 import torch.nn as nn
@@ -37,36 +38,21 @@ class ActorNet(nn.Module):
         dist = F.softmax(action_score, dim=-1)
         return dist
 
-class PolicyNetGaussian(nn.Module):
-    def __init__(self):
+class ActorGaussian(nn.Module):
+    def __init__(self, state_dim, hidden_dim, output_dim):
         super().__init__()
-        self.fc1 = nn.Linear(23, 512)
-        self.fc2 = nn.Linear(512, 512)
-        self.fc3 = nn.Linear(512, 512)
-        self.fc4_mean = nn.Linear(512, 2)
-        self.fc4_logstd = nn.Linear(512, 2)
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.mean = nn.Linear(hidden_dim, output_dim)
+        self.log_std = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, s):
-        h_fc1 = F.relu(self.fc1(s))
-        h_fc2 = F.relu(self.fc2(h_fc1))
-        h_fc3 = F.relu(self.fc3(h_fc2))
-        a_mean = self.fc4_mean(h_fc3)
-        a_logstd = self.fc4_logstd(h_fc3)
-        a_logstd = torch.clamp(a_logstd, min=-20, max=2)
-        return a_mean, a_logstd
-    
-    def sample(self, s):
-        a_mean, a_logstd = self.forward(s)
-        a_std = a_logstd.exp()
-        normal = Normal(a_mean, a_std)
-        x_t = normal.rsample()
-        action = torch.tanh(x_t)
-        log_prob = normal.log_prob(x_t)
-
-        # Enforcing action Bound
-        log_prob -= torch.log(1 - action.pow(2) + 1e-6)
-        log_prob = log_prob.sum(1, keepdim=True)
-        return action, log_prob, torch.tanh(a_mean)
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        mean = self.mean(x)
+        log_std = self.log_std(x)
+        log_std = torch.clamp(log_std, -20, 2)
+        return mean, log_std
 
 # DDPG & TD3
 class ActorDPG(nn.Module):
@@ -100,9 +86,9 @@ class ActorPPO(nn.Module):
         self.mu_head = nn.Linear(hidden_dim, 1)
         self.sigma_head = nn.Linear(hidden_dim, 1)
         if layer_norm:
-            self.layer_norm(self.fc1, std=1.0)
-            self.layer_norm(self.mu_head, std=1.0)
-            self.layer_norm(self.sigma_head, std=1.0)
+            layer_norm(self.fc1, std=1.0)
+            layer_norm(self.mu_head, std=1.0)
+            layer_norm(self.sigma_head, std=1.0)
 
     def forward(self, state):
         x = torch.tanh(self.fc1(state))
@@ -111,10 +97,10 @@ class ActorPPO(nn.Module):
         sigma = F.softplus(self.sigma_head(x))
         return mu, sigma
     
-    @staticmethod
-    def layer_norm(layer, std=1.0, bias_const=0.0):
-        torch.nn.init.orthogonal_(layer.weight, std)
-        torch.nn.init.constant_(layer.bias, bias_const)
+    # @staticmethod
+    # def layer_norm(layer, std=1.0, bias_const=0.0):
+    #     torch.nn.init.orthogonal_(layer.weight, std)
+    #     torch.nn.init.constant_(layer.bias, bias_const)
 
 class CriticV(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, layer_norm=False):
@@ -122,18 +108,18 @@ class CriticV(nn.Module):
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.value_head = nn.Linear(hidden_dim, output_dim)
         if layer_norm:
-            self.layer_norm(self.fc1, std=1.0)
-            self.layer_norm(self.value_head, std=1.0)
+            layer_norm(self.fc1, std=1.0)
+            layer_norm(self.value_head, std=1.0)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
         state_value = self.value_head(x)
         return state_value
 
-    @staticmethod
-    def layer_norm(layer, std=1.0, bias_const=0.0):
-        torch.nn.init.orthogonal_(layer.weight, std)
-        torch.nn.init.constant_(layer.bias, bias_const)
+    # @staticmethod
+    # def layer_norm(layer, std=1.0, bias_const=0.0):
+    #     torch.nn.init.orthogonal_(layer.weight, std)
+    #     torch.nn.init.constant_(layer.bias, bias_const)
 
 class CriticDQN(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim, atoms=51, layer_norm=False):
@@ -145,8 +131,8 @@ class CriticDQN(nn.Module):
         self.use_distributional = False
 
         if layer_norm:
-            self.layer_norm(self.fc1, std=1.0)
-            self.layer_norm(self.q_value, std=1.0)
+            layer_norm(self.fc1, std=1.0)
+            layer_norm(self.q_value, std=1.0)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -164,10 +150,10 @@ class CriticDQN(nn.Module):
         q_value = self.q_value(x)
         return q_value
 
-    @staticmethod
-    def layer_norm(layer, std=1.0, bias_const=0.0):
-        torch.nn.init.orthogonal_(layer.weight, std)
-        torch.nn.init.constant_(layer.bias, bias_const)
+    # @staticmethod
+    # def layer_norm(layer, std=1.0, bias_const=0.0):
+    #     torch.nn.init.orthogonal_(layer.weight, std)
+    #     torch.nn.init.constant_(layer.bias, bias_const)
 
 class CriticQ(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
@@ -176,8 +162,76 @@ class CriticQ(nn.Module):
         self.net = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
                                  nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
                                  nn.Linear(hidden_dim, 1), )
+        # self.net = build_critic_network(state_dim, hidden_dim, action_dim)
 
     def forward(self, state, action):
         input = torch.cat((state, action), dim=1)
         q_value = self.net(input)
         return q_value
+
+class CriticQTwin(CriticQ):
+    def __init__(self, state_dim, hidden_dim, action_dim):
+        super().__init__(state_dim, hidden_dim, action_dim)
+        self.net_copy = deepcopy(self.net)
+        # self.net_copy = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
+        #                          nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+        #                          nn.Linear(hidden_dim, 1), )
+        # self.net1 = build_critic_network(state_dim, hidden_dim, action_dim)
+        # self.net2 = build_critic_network(state_dim, hidden_dim, action_dim)
+
+    # def forward(self, state, action):
+    #     x = torch.cat((state, action), dim=1)
+    #     q_value = self.net(x)
+    #     return q_value
+
+    def twinQ(self, state, action):
+        x = torch.cat((state, action), dim=1)
+        q1_value = self.net(x)
+        q2_value = self.net_copy(x)
+        return q1_value, q2_value
+
+def layer_norm(layer, std=1.0, bias_const=1e-6):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+
+def build_critic_network(state_dim, hidden_dim, action_dim, norm=False):
+    nn_list = []
+    nn_list.extend([nn.Linear(state_dim + action_dim, hidden_dim), nn.ReLU(),])
+    nn_list.extend([nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+                    nn.Linear(hidden_dim, 1), ])
+    net = nn.Sequential(*nn_list)
+    return net
+
+
+class DenseNet(nn.Module):
+    def __init__(self, mid_dim):
+        super(DenseNet, self).__init__()
+        self.dense1 = nn.Sequential(
+            nn.Linear(mid_dim * 1, mid_dim * 1),
+            HardSwish(),
+        )
+        self.dense2 = nn.Sequential(
+            nn.Linear(mid_dim * 2, mid_dim * 2),
+            HardSwish(),
+        )
+
+        layer_norm(self.dense1[0], std=1.0)
+        layer_norm(self.dense2[0], std=1.0)
+
+        # self.dropout = nn.Dropout(p=0.1)
+
+    def forward(self, x):
+        x = torch.cat((x, self.dense1(x)), dim=1)
+        x = torch.cat((x, self.dense2(x)), dim=1)
+        # self.dropout.p = rd.uniform(0.0, 0.1)
+        # return self.dropout(x)
+        return x
+
+class HardSwish(nn.Module): # 一种激活函数
+    def __init__(self):
+        super(HardSwish, self).__init__()
+        self.relu6 = nn.ReLU6()
+
+    def forward(self, x):
+        return self.relu6(x + 3.) / 6. * x
+

@@ -2,7 +2,8 @@ import gym, os, time
 import matplotlib.pyplot as plt
 import torch
 
-from drl.model import ActorDPG, CriticQ
+
+from drl.model import ActorDPG, CriticQTwin
 from drl.algorithm import TD3
 
 env_name = 'Pendulum-v0'
@@ -24,13 +25,13 @@ actor_learn_freq = 1
 target_update_freq = 10
 batch_size = 1000
 
-model_save_dir = 'save/test_td3_double_2'
+model_save_dir = 'save/test_td3_4'
 model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
 save_file = model_save_dir.split('/')[-1]
 os.makedirs(model_save_dir, exist_ok=True)
 
 actor = ActorDPG(state_space, hidden_dim, action_space)
-critic = CriticQ(state_space, hidden_dim, action_space)
+critic = CriticQTwin(state_space, hidden_dim, action_space)
 # buffer = Buffer(buffer_size)
 policy = TD3(actor, critic, action_max=action_max, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq, target_update_freq=target_update_freq, batch_size=batch_size)
 
@@ -43,7 +44,7 @@ def sample(env, policy, max_step, test=False):
         action = policy.choose_action(state, test)
         action *= env.action_space.high[0]
         next_state, reward, done, info = env.step([action])
-        env.render()
+        # env.render()
         # process env callback
         if not test:
             mask = 0 if done else 1

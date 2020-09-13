@@ -45,21 +45,24 @@ class TD3(BasePolicy):
         self.buffer = ReplayBuffer(buffer_size)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.actor_eval = actor_net.to(self.device)
-        self.critic_1 = critic_net.to(self.device)  # two Q net
-        self.critic_2 = deepcopy(critic_net).to(self.device)
+        self.actor_eval = actor_net.to(self.device).train()
+        # self.critic_1 = critic_net.to(self.device)  # two Q net
+        # self.critic_2 = deepcopy(critic_net).to(self.device)
+        self.critic_eval = critic_net.to(self.device).train() # CriticQTwin
 
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
-        self.critic_1_optim = optim.Adam(self.critic_1.parameters(), lr=self.lr)
-        self.critic_2_optim = optim.Adam(self.critic_2.parameters(), lr=self.lr)
+        # self.critic_1_optim = optim.Adam(self.critic_1.parameters(), lr=self.lr)
+        # self.critic_2_optim = optim.Adam(self.critic_2.parameters(), lr=self.lr)
+        self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
 
-        self.actor_eval.train()
-        self.critic_1.train()
-        self.critic_2.train()
+        # self.actor_eval.train()
+        # self.critic_1.train()
+        # self.critic_2.train()
 
         self.actor_target = self.copy_net(self.actor_eval)
-        self.critic_1_target = self.copy_net(self.critic_1)
-        self.critic_2_target = self.copy_net(self.critic_2)
+        # self.critic_1_target = self.copy_net(self.critic_1)
+        # self.critic_2_target = self.copy_net(self.critic_2)
+        self.critic_target = self.copy_net(self.critic_eval)
 
         self.criterion = nn.MSELoss()  # why mse?
 
@@ -93,29 +96,39 @@ class TD3(BasePolicy):
             # A_noise = A_noise.clamp(-self.action_max, self.action_max)
             A_noise = self.actor_target.predict(S_, self.action_max, self.noise_std, self.noise_clip)
             with torch.no_grad():
-                q1_next = self.critic_1_target(S_, A_noise)  # add noise
-                q2_next = self.critic_2_target(S_, A_noise)
+                # q1_next = self.critic_1_target(S_, A_noise)  # add noise
+                # q2_next = self.critic_2_target(S_, A_noise)
+                q1_next, q2_next = self.critic_target.twinQ(S_, A_noise)
                 q_next = torch.min(q1_next, q2_next)
                 q_target = R + M * self._gamma * q_next.cpu()
                 q_target = q_target.to(self.device)
 
-            q1_eval = self.critic_1(S, A)
-            critic_1_loss = self.criterion(q1_eval, q_target)
-            self.critic_1_optim.zero_grad()
-            critic_1_loss.backward()
-            self.critic_1_optim.step()
+            # q1_eval = self.critic_1(S, A)
+            # critic_1_loss = self.criterion(q1_eval, q_target)
+            # self.critic_1_optim.zero_grad()
+            # critic_1_loss.backward()
+            # self.critic_1_optim.step()
 
-            q2_eval = self.critic_2(S, A)
-            critic_2_loss = self.criterion(q2_eval, q_target)
-            self.critic_2_optim.zero_grad()
-            critic_2_loss.backward()
-            self.critic_2_optim.step()
+            # q2_eval = self.critic_2(S, A)
+            # critic_2_loss = self.criterion(q2_eval, q_target)
+            # self.critic_2_optim.zero_grad()
+            # critic_2_loss.backward()
+            # self.critic_2_optim.step()
 
-            loss_critic_avg += 0.5 * (critic_1_loss.item() + critic_2_loss.item())
+            # loss_critic_avg += 0.5 * (critic_1_loss.item() + critic_2_loss.item())
+
+            q1_eval, q2_eval = self.critic_eval.twinQ(S, A)
+            critic_loss = self.criterion(q1_eval, q_target) + self.criterion(q2_eval, q_target)
+            self.critic_eval_optim.zero_grad()
+            critic_loss.backward()
+            self.critic_eval_optim.step()
+
+            loss_critic_avg += 0.5 * critic_loss.item()
             self._learn_critic_cnt += 1
 
             if self._learn_critic_cnt % self.actor_learn_freq == 0:
-                actor_loss = -self.critic_1(S, self.actor_eval(S)).mean()  # no noise
+                # actor_loss = -self.critic_1(S, self.actor_eval(S)).mean()  # no noise
+                actor_loss = -self.critic_eval(S, self.actor_eval(S)).mean()  # no noise
                 loss_actor_avg += actor_loss.item()
 
                 self.actor_eval_optim.zero_grad()
@@ -129,8 +142,9 @@ class TD3(BasePolicy):
                 if self._verbose:
                     print(f'=======Soft_sync_weight of DDPG=======')
                 self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
-                self.soft_sync_weight(self.critic_1_target, self.critic_1, self.tau)
-                self.soft_sync_weight(self.critic_2_target, self.critic_2, self.tau)
+                self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
+                # self.soft_sync_weight(self.critic_1_target, self.critic_1, self.tau)
+                # self.soft_sync_weight(self.critic_2_target, self.critic_2, self.tau)
 
         loss_actor_avg /= (self._update_iteration/self.actor_learn_freq)
         loss_critic_avg /= self._update_iteration

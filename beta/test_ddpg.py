@@ -27,7 +27,7 @@ actor_learn_freq = 1
 target_update_freq = 10
 batch_size = 1000
 
-model_save_dir = 'save/test_ddpg_double'
+model_save_dir = 'save/test_ddpg_6'
 model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
 save_file = model_save_dir.split('/')[-1]
 os.makedirs(model_save_dir, exist_ok=True)
@@ -65,7 +65,7 @@ def sample(env, policy, max_step, test=False):
 
 
 run_type = ['train', 'eval']
-run = run_type[1]
+run = run_type[0]
 plot_name = 'DDPG_TwoNet_Double'
 
 
