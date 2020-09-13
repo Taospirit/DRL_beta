@@ -6,3 +6,4 @@ a deep reinforcement learning implement
 |2020-8-3|add A2C/DDPG|-|-|
 |2020-8-4|add GAE | add PPO & SAC|-|
 |2020-9-7|add PPO/TD3/DQN | add SAC |-|
+|2020-9-14|add SAC | todo |-|
