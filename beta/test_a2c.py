@@ -31,6 +31,33 @@ model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
 save_file = model_save_dir.split('/')[-1]
 os.makedirs(model_save_dir, exist_ok=True)
 
+class ActorNet(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.action_head = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        action_score = self.action_head(x)
+        dist = F.softmax(action_score, dim=-1)
+        return dist
+
+class CriticV(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, layer_norm=False):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.value_head = nn.Linear(hidden_dim, output_dim)
+        if layer_norm:
+            layer_norm(self.fc1, std=1.0)
+            layer_norm(self.value_head, std=1.0)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        state_value = self.value_head(x)
+        return state_value
+
+
 actor = ActorNet(state_space, hidden_dim, action_space)
 critic = CriticV(state_space, hidden_dim, 1)
 policy = A2C(actor, critic, buffer_size=max_step, actor_learn_freq=actor_learn_freq,

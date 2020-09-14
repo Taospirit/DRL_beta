@@ -33,6 +33,38 @@ model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
 save_file = model_save_dir.split('/')[-1]
 os.makedirs(model_save_dir, exist_ok=True)
 
+class ActorPPO(nn.Module):
+    def __init__(self, state_dim, hidden_dim, action_dim, layer_norm=False):
+        super().__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.mu_head = nn.Linear(hidden_dim, 1)
+        self.sigma_head = nn.Linear(hidden_dim, 1)
+        # if layer_norm:
+        #     layer_norm(self.fc1, std=1.0)
+        #     layer_norm(self.mu_head, std=1.0)
+        #     layer_norm(self.sigma_head, std=1.0)
+
+    def forward(self, state):
+        x = torch.tanh(self.fc1(state))
+        # x = F.relu(self.fc1(state))
+        mu = 2.0 * torch.tanh(self.mu_head(x)) # test for gym_env: 'Pendulum-v0'
+        sigma = F.softplus(self.sigma_head(x))
+        return mu, sigma
+
+class CriticV(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, layer_norm=False):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.value_head = nn.Linear(hidden_dim, output_dim)
+        if layer_norm:
+            layer_norm(self.fc1, std=1.0)
+            layer_norm(self.value_head, std=1.0)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        state_value = self.value_head(x)
+        return state_value
+
 actor = ActorPPO(state_space, hidden_dim, action_space)
 critic = CriticV(state_space, hidden_dim, action_space)
 policy = PPO(actor, critic, buffer_size=buffer_size,

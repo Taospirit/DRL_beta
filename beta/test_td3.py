@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from drl.model import ActorDPG, CriticQTwin
+# from drl.model import ActorDPG, CriticQTwin
 from drl.algorithm import TD3
 
 env_name = 'Pendulum-v0'
@@ -29,6 +29,48 @@ model_save_dir = 'save/test_td3_4'
 model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
 save_file = model_save_dir.split('/')[-1]
 os.makedirs(model_save_dir, exist_ok=True)
+
+class ActorDPG(nn.Module):
+    def __init__(self, state_dim, hidden_dim, action_dim):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(state_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, action_dim), nn.Tanh(), )
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    def forward(self, state):
+        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        action = self.net(state)
+        return action
+
+    def predict(self, state, action_max, noise_std=0, noise_clip=0.5):
+        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        action = self.net(state)
+        if noise_std:
+            noise_norm = torch.ones_like(action).data.normal_(0, noise_std).to(self.device)
+            action += noise_norm.clamp(-noise_clip, noise_clip)
+
+        action = action.clamp(-action_max, action_max)
+        return action
+
+class CriticQTwin(CriticQ):
+    def __init__(self, state_dim, hidden_dim, action_dim):
+        super().__init__(state_dim, hidden_dim, action_dim)
+        self.net = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, 1), )
+        self.net_copy = deepcopy(self.net)
+        
+    def forward(self, state, action):
+        x = torch.cat((state, action), dim=1)
+        q_value = self.net(x)
+        return q_value
+
+    def twinQ(self, state, action):
+        x = torch.cat((state, action), dim=1)
+        q1_value = self.net(x)
+        q2_value = self.net_copy(x)
+        return q1_value, q2_value
 
 actor = ActorDPG(state_space, hidden_dim, action_space)
 critic = CriticQTwin(state_space, hidden_dim, action_space)
@@ -57,7 +99,8 @@ def sample(env, policy, max_step, test=False):
 
     if not test:
         pg_loss, v_loss = policy.learn()
-    return reward_avg/(step+1), step, pg_loss, v_loss
+        return reward_avg/(step+1), step, pg_loss, v_loss
+    return reward_avg/(step+1), step, 0, 0
 
 from test_tool import policy_test
 run_type = ['train', 'eval']
