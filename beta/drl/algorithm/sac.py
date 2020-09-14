@@ -202,6 +202,7 @@ class SAC(BasePolicy):
 
             # policy loss
             policy_loss = (log_prob - torch.min(new_q1_value, new_q2_value)).mean()
+            # policy_loss = (log_prob - torch.min(new_q1_value, new_q2_value).detach()).mean()
 
             # update V
             self.value_eval_optim.zero_grad()

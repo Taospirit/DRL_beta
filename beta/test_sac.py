@@ -29,9 +29,9 @@ max_step = 300
 buffer_size = 50000
 actor_learn_freq = 1
 target_update_freq = 10
-batch_size = 128
+batch_size = 300
 
-model_save_dir = 'save/test_sac'
+model_save_dir = 'save/test_sac_mac'
 model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
 save_file = model_save_dir.split('/')[-1]
 os.makedirs(model_save_dir, exist_ok=True)

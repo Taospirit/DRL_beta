@@ -1,0 +1,90 @@
+env: Pendulum-v0 
+state_space: 3, action_space: 1
+episodes: 5000, max_step: 200
+===============================
+buffer: <drl.utils.ReplayBuffer object at 0x12914d710> 
+lr: 0.01 
+eps: 1.1920928955078125e-07 
+tau: 1 
+actor_learn_freq: 1 
+target_update_freq: 10 
+_gamma: 0.99 
+_update_iteration: 10 
+_sync_cnt: 0 
+_learn_critic_cnt: 0 
+_learn_actor_cnt: 0 
+_verbose: False 
+_batch_size: 1000 
+device: cpu 
+actor_eval: ActorDPG(
+  (net): Sequential(
+    (0): Linear(in_features=3, out_features=32, bias=True)
+    (1): ReLU()
+    (2): Linear(in_features=32, out_features=32, bias=True)
+    (3): ReLU()
+    (4): Linear(in_features=32, out_features=1, bias=True)
+    (5): Tanh()
+  )
+) 
+critic_eval: CriticQTwin(
+  (net): Sequential(
+    (0): Linear(in_features=4, out_features=32, bias=True)
+    (1): ReLU()
+    (2): Linear(in_features=32, out_features=32, bias=True)
+    (3): ReLU()
+    (4): Linear(in_features=32, out_features=1, bias=True)
+  )
+  (net_copy): Sequential(
+    (0): Linear(in_features=4, out_features=32, bias=True)
+    (1): ReLU()
+    (2): Linear(in_features=32, out_features=32, bias=True)
+    (3): ReLU()
+    (4): Linear(in_features=32, out_features=1, bias=True)
+  )
+) 
+actor_eval_optim: Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    eps: 1e-08
+    lr: 0.01
+    weight_decay: 0
+) 
+critic_eval_optim: Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    eps: 1e-08
+    lr: 0.01
+    weight_decay: 0
+) 
+actor_target: ActorDPG(
+  (net): Sequential(
+    (0): Linear(in_features=3, out_features=32, bias=True)
+    (1): ReLU()
+    (2): Linear(in_features=32, out_features=32, bias=True)
+    (3): ReLU()
+    (4): Linear(in_features=32, out_features=1, bias=True)
+    (5): Tanh()
+  )
+) 
+critic_target: CriticQTwin(
+  (net): Sequential(
+    (0): Linear(in_features=4, out_features=32, bias=True)
+    (1): ReLU()
+    (2): Linear(in_features=32, out_features=32, bias=True)
+    (3): ReLU()
+    (4): Linear(in_features=32, out_features=1, bias=True)
+  )
+  (net_copy): Sequential(
+    (0): Linear(in_features=4, out_features=32, bias=True)
+    (1): ReLU()
+    (2): Linear(in_features=32, out_features=32, bias=True)
+    (3): ReLU()
+    (4): Linear(in_features=32, out_features=1, bias=True)
+  )
+) 
+criterion: MSELoss() 
+noise_clip: 0.5 
+noise_std: 0.2 
+action_max: 2.0 
