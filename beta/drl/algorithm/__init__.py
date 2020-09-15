@@ -5,6 +5,7 @@ from drl.algorithm.ddpg import DDPG
 from drl.algorithm.ppo import PPO
 from drl.algorithm.td3 import TD3
 from drl.algorithm.sac import SAC
+from drl.algorithm.sac2 import SAC2
 
 __all__ = [
     'Base'

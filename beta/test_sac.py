@@ -9,7 +9,9 @@ import torch.nn.functional as F
 from torch.distributions import Normal
 
 # from drl.model import ActorGaussian, CriticQ
-from drl.algorithm import SAC
+from drl.algorithm import SAC2 as SAC
+# from drl.algorithm import SAC
+
 
 env_name = 'Pendulum-v0'
 env = gym.make(env_name)
@@ -20,8 +22,9 @@ torch.manual_seed(1)
 # Parameters
 state_space = env.observation_space.shape[0]
 action_space = env.action_space.shape[0]
-action_max = env.action_space.high[0] # 2
-# print (f'action_max is {env.action_space.low[0]}')
+action_scale = (env.action_space.high - env.action_space.low) / 2
+action_bias = (env.action_space.high + env.action_space.low) / 2
+
 # assert 0
 hidden_dim = 256
 episodes = 5000
@@ -53,7 +56,6 @@ class ActorGaussian(nn.Module):
         layer_norm(self.mean, std=1.0)
         layer_norm(self.log_std, std=1.0)
 
-
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -63,13 +65,13 @@ class ActorGaussian(nn.Module):
         return mean, log_std
     
     def action(self, state):
-        state = torch.FloatTensor(state).to(self.device)
         mean, log_std = self.forward(state)
         std = log_std.exp()
         normal = Normal(mean, std)
         
         z = normal.sample()
         action = torch.tanh(z).detach().cpu().numpy()
+        action = action * action_scale + action_bias
         return action
 
     # Use re-parameterization tick
