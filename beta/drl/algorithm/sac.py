@@ -53,128 +53,17 @@ class SAC(BasePolicy):
         self.value_eval = v_net.to(self.device).train()
 
         self.value_target = self.copy_net(self.value_eval)
-        # self.actor_target = self.copy_net(self.actor_eval)
-        # self.critic_target = self.copy_net(self.critic_eval)
         
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
         self.value_eval_optim = optim.Adam(self.value_eval.parameters(), lr=self.lr)
 
         self.criterion = nn.SmoothL1Loss()
-        # self.action_max = action_space.high[0]
-        action_scale = (action_space.high - action_space.low) / 2
-        action_bias = (action_space.high + action_space.low) / 2
-        # self.action_scale = torch.tensor(action_scale, dtype=torch.float32, device=self.device)
-        # self.action_bias = torch.tensor(action_bias, dtype=torch.float32, device=self.device)
-      
-        # self.action_num = action_space.shape[0]
-
-        self.target_entropy = -torch.prod(torch.Tensor(action_space.shape).to(self.device)).item()
-        self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-        self.alpha_optim = optim.Adam([self.log_alpha], lr=self.lr)
-        self.alpha = 0.2
-        # self.alpha = self.log_alpha.exp()
-        # self.target_entropy = -torch.Tensor(self.n_actions).to(self.device) 
-
-    def choose_action_(self, state, test=False):
-        state = torch.tensor(state, dtype=torch.float32, device=self.device)
-        mean, log_std = self.actor_eval(state)
-        std = log_std.exp()
-        dist = Normal(mean, std)
-        x_t = dist.rsample()
-        y_t = torch.tanh(x_t)
-        # print (f'device {y_t.device}, scale {self.action_scale.device}, bias {self.action_bias.device}')
-        action = y_t * self.action_scale + self.action_bias
-
-        # sample = Normal(mean, std).rsample()
-        # action = torch.tanh(sample).detach()
-        return action.detach().cpu().numpy()[0]
-
-    def choose_action(self, state, test=False):
-        # state = torch.tensor(state, dtype=torch.float32, device=self.device)
-        action = self.actor_eval.action(state)
-        # action = action * self.action_scale + self.action_bias
-        action = action * 2 + 0
-        return action
-
-    # Use re-parameterization tick
-    def get_action_log_prob(self, model, state):
-        # epsilon = 1e-6
-        mean, log_std = model(state)
-        std = log_std.exp()
-        dist = Normal(mean, std)
-        
-        # x_t = dist.rsample()
-        # y_t = torch.tanh(x_t)
-        # action = y_t * self.action_scale + self.action_bias
-
-        # log_prob = dist.log_prob(x_t)
-        # log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        # log_prob = log_prob.sum(1, keepdim=True)
-        noise = Normal(0, 1)
-        z = noise.sample()
-        action = torch.tanh(mean + std * z.to(self.device))
-        log_prob = dist.log_prob(mean + std * z.to(self.device))
-        log_prob -= torch.log(self.action_scale*(1 - action.pow(2)) + 1e-6)
-        # log_prob = log_prob.sum(1, keepdim=True)
-
-        return action, log_prob
     
-    def learn_(self):
-        for _ in range(self._update_iteration):
-            batch_split = self.buffer.split_batch(self._batch_size)
-            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device)
-            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).view(-1, 1)
-            M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
-            R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
-            S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=self.device)
-            # Log = torch.tensor(batch_split['l'], dtype=torch.float32, device=self.device)
-            with torch.no_grad():
-                # A_, Log_, _ = self.actor_eval.sample(S_) #TODO:
-                A_, Log_ = self.get_action_log_prob(self.actor_target, S_)
-                q1_next, q2_next = self.critic_target(S_, A_) # ?(S, A_)
-                q_next = torch.min(q1_next, q2_next) - self.alpha * Log_
-                # q_next = self.critic_target(S_, A_) - self.alpha * Log_
-                q_target = R + M * self._gamma * q_next.cpu()
-                q_target = q_target.to(self.device)
-            
-            q1_eval, q2_eval = self.critic_eval(S, A)
-            critic_loss = self.criterion(q1_eval, q_target) + self.criterion(q2_eval, q_target)
-
-            self.critic_eval_optim.zero_grad()
-            critic_loss.backward()
-            self.critic_eval_optim.step()
-            self._learn_critic_cnt += 1
-
-            # critic loss
-            # q_eval = self.critic_eval(S, A)
-            # critic_loss = self.criterion(q_eval, q_target)
-            # self.critic_eval_optim.zero_grad()
-            # critic_loss.backward()
-            # self._learn_critic_cnt += 1
-            
-            if self._learn_critic_cnt % self.actor_learn_freq:
-                # a_curr, log_curr, _ = self.actor_eval.sample(S) #TODO:
-                A, Log = self.get_action_log_prob(self.actor_eval, S)
-                q1_next, q2_next = self.critic_eval(S, A)
-                q_next = torch.min(q1_next, q2_next)
-                # actor loss
-                # actor_loss = (self.alpha * Log - q_next.detach()).mean()
-                actor_loss = (self.alpha * Log - q_next).mean()
-                self.actor_eval_optim.zero_grad()
-                actor_loss.backward()
-                self.actor_eval_optim.step()
-
-                # alpha loss
-                alpha_loss = -(self.log_alpha * (Log + self.target_entropy).detach()).mean()
-                self.alpha_optim.zero_grad()
-                alpha_loss.backward()
-                self.alpha_optim.step()
-                self.alpha = self.log_alpha.exp()
-
-            if self._learn_critic_cnt % self.target_update_freq:
-                self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
-                self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
+    def choose_action(self, state, test=False):
+        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        action = self.actor_eval.action(state)
+        return action
 
     def learn(self):
         for _ in range(self._update_iteration):
@@ -220,5 +109,4 @@ class SAC(BasePolicy):
             self.actor_eval_optim.step()
 
             if self._learn_critic_cnt % self.target_update_freq:
-                # self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
                 self.soft_sync_weight(self.value_target, self.value_eval, self.tau)
