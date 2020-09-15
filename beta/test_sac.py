@@ -54,7 +54,6 @@ class ActorGaussian(nn.Module):
         layer_norm(self.mean, std=1.0)
         layer_norm(self.log_std, std=1.0)
 
-
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))

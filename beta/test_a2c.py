@@ -43,6 +43,11 @@ class ActorNet(nn.Module):
         dist = F.softmax(action_score, dim=-1)
         return dist
 
+    def choose_action(self, state):
+        # todo
+        pass
+
+
 class CriticV(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, layer_norm=False):
         super().__init__()
@@ -57,12 +62,10 @@ class CriticV(nn.Module):
         state_value = self.value_head(x)
         return state_value
 
-
 actor = ActorNet(state_space, hidden_dim, action_space)
 critic = CriticV(state_space, hidden_dim, 1)
 policy = A2C(actor, critic, buffer_size=max_step, actor_learn_freq=actor_learn_freq,
              target_update_freq=target_update_freq)
-
 
 def sample(env, policy, max_step, test=False):
     assert env, 'You must set env for sample'

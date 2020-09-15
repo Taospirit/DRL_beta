@@ -37,9 +37,12 @@ class ReplayBuffer(object):
     def split(self, batchs):
         split_res = {}
         for key in batchs[-1].keys():
-            values = [item[key] for item in batchs]
+            # values = [item[key] for item in batchs]
+            values = np.array([item[key] for item in batchs])
+            # print (type(values))
             split_res[key] = values
-
+            # print (split_res[key].shape)
+            # for item in batchs:
         return split_res
 
     def split_batch(self, batch_size):
@@ -97,7 +100,7 @@ class SegmentTree():
         self.sum_tree[tree_index] = value # self.sum_tree store value
         self._propagate(tree_index)
         # self.max = max(value, self.max)
-        self.index = (self.index + 1) % self._sizem
+        self.index = (self.index + 1) % self._size
         self.full = self.full or self.index == 0 # ?
         self.max = max(value, self.max)
 
