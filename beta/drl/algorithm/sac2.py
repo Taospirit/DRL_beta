@@ -60,13 +60,10 @@ class SAC2(BasePolicy):
 
         self.criterion = nn.SmoothL1Loss()
 
-        # self.target_entropy = -torch.prod(torch.tensor(action_space.shape).to(self.device)).item()
         self.target_entropy = -torch.tensor(1).to(self.device)
         self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
         self.alpha_optim = optim.Adam([self.log_alpha], lr=self.lr)
-        self.alpha = 0.5
-        # self.alpha = self.log_alpha.exp()
-        # self.target_entropy = -torch.Tensor(self.n_actions).to(self.device) 
+        self.alpha = self.log_alpha.exp()
 
     def choose_action(self, state, test=False):
         state = torch.tensor(state, dtype=torch.float32, device=self.device)
@@ -82,7 +79,7 @@ class SAC2(BasePolicy):
             M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
             R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
             S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=self.device)
-            # Log = torch.tensor(batch_split['l'], dtype=torch.float32, device=self.device)
+
             with torch.no_grad():
                 next_A, next_log = self.actor_target.evaluate(S_)
                 q1_next, q2_next = self.critic_target(S_, next_A)
@@ -105,7 +102,7 @@ class SAC2(BasePolicy):
                 q1_next, q2_next = self.critic_eval(S, curr_A)
                 q_next = torch.min(q1_next, q2_next)
 
-                # actor loss
+                # pg_loss
                 actor_loss = (self.alpha * curr_log - q_next).mean()
                 self.actor_eval_optim.zero_grad()
                 actor_loss.backward()
