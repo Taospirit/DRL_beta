@@ -5,7 +5,7 @@ import time
 import matplotlib.pyplot as plt
 import torch
 
-from drl.model import ActorNet, CriticDQN
+# from drl.model import ActorNet, CriticDQN
 from drl.algorithm import DQN
 # from drl.algorithm import DoubleDQN
 from drl.utils import ReplayBuffer as Buffer
@@ -33,9 +33,37 @@ model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
 save_file = model_save_dir.split('/')[-1]
 os.makedirs(model_save_dir, exist_ok=True)
 
+class CriticDQN(nn.Module):
+    def __init__(self, state_dim, hidden_dim, action_dim, atoms=51, layer_norm=False):
+        super().__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.q_value = nn.Linear(hidden_dim, action_dim)
+        self.v_value = nn.Linear(hidden_dim, 1)
+        self.use_dueling = False
+        self.use_distributional = False
+
+        if layer_norm:
+            layer_norm(self.fc1, std=1.0)
+            layer_norm(self.q_value, std=1.0)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+
+        if self.use_dueling:
+            v_value = self.v_value(x)
+            adv = self.q_value(x)
+            return v_value + adv - adv.mean()
+        
+        if self.use_distributional:
+            self.q_value = nn.Linear(hidden_dim, action_dim*atoms)
+            x = self.q_value(x)
+            return F.softmax(x.view(-1, action_dim, atoms), dim=2)
+
+        q_value = self.q_value(x)
+        return q_value
+
 critic = CriticDQN(state_space, hidden_dim, action_space)
 policy = DQN(critic, action_shape=action_shape, buffer_size=buffer_size, batch_size=batch_size, target_update_freq=100)
-
 
 def sample(env, policy, max_step, test=False):
     assert env, 'You must set env for sample'

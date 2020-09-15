@@ -4,6 +4,7 @@ import os
 import time
 import matplotlib.pyplot as plt
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 from drl.model import ActorNet, CriticV
 from drl.algorithm import A2C
@@ -30,11 +31,41 @@ model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
 save_file = model_save_dir.split('/')[-1]
 os.makedirs(model_save_dir, exist_ok=True)
 
+class ActorNet(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.action_head = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        action_score = self.action_head(x)
+        dist = F.softmax(action_score, dim=-1)
+        return dist
+
+    def choose_action(self, state):
+        # todo
+        pass
+
+
+class CriticV(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, layer_norm=False):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.value_head = nn.Linear(hidden_dim, output_dim)
+        if layer_norm:
+            layer_norm(self.fc1, std=1.0)
+            layer_norm(self.value_head, std=1.0)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        state_value = self.value_head(x)
+        return state_value
+
 actor = ActorNet(state_space, hidden_dim, action_space)
 critic = CriticV(state_space, hidden_dim, 1)
 policy = A2C(actor, critic, buffer_size=max_step, actor_learn_freq=actor_learn_freq,
              target_update_freq=target_update_freq)
-
 
 def sample(env, policy, max_step, test=False):
     assert env, 'You must set env for sample'
@@ -45,7 +76,7 @@ def sample(env, policy, max_step, test=False):
         action, log_prob = policy.choose_action(state, test)
         # print (action, type(action))
         next_state, reward, done, info = env.step(action)
-        env.render()
+        # env.render() 
         # process env callback
         if not test:
             # policy.process(s=state, a=action, s_=next_state, r=reward, d=done)
@@ -63,7 +94,7 @@ def sample(env, policy, max_step, test=False):
 
 
 run_type = ['train', 'eval', 'retrain']
-run = run_type[1]
+run = run_type[0]
 plot_name = 'A2C_TwoNet_no_Double'
 
 
@@ -88,6 +119,7 @@ def main():
         print('Setting your run type!')
         return 0
 
+    writer = SummaryWriter('./logs/1/')
     live_time = []
     for i_eps in range(episodes):
         rewards, step = sample(env, policy, max_step, test=test)
@@ -96,11 +128,14 @@ def main():
             continue
         live_time.append(rewards)
         policy_test.plot(live_time, plot_name, model_save_dir)
-
+        
+        writer.add_scalar('rewards_per_epi', rewards, global_step=i_eps)
+        
         if i_eps > 0 and i_eps % 100 == 0:
             print(f'i_eps is {i_eps}')
             policy.save_model(model_save_dir, save_file, save_actor=True, save_critic=True)
     env.close()
+    writer.close()
 
 
 if __name__ == '__main__':

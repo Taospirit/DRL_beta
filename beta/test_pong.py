@@ -10,22 +10,19 @@ from torch.distributions import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 # from drl.model import ActorGaussian, CriticQ
-from drl.algorithm import SAC2 as SAC
-# from drl.algorithm import SAC
+from drl.algorithm import SAC
 
-
-env_name = 'Pendulum-v0'
+env_name = 'Pong-v0'
 env = gym.make(env_name)
 env = env.unwrapped
 env.seed(1)
 torch.manual_seed(1)
 
 # Parameters
-state_space = env.observation_space.shape[0]
-action_space = env.action_space.shape[0]
-action_scale = (env.action_space.high - env.action_space.low) / 2
-action_bias = (env.action_space.high + env.action_space.low) / 2
-
+# state_space = env.observation_space.shape[0]
+# action_space = env.action_space.shape[0]
+# action_max = env.action_space.high[0] # 2
+# print (f'action_max is {env.action_space.low[0]}')
 # assert 0
 hidden_dim = 256
 episodes = 5000
@@ -45,27 +42,32 @@ def layer_norm(layer, std=1.0, bias_const=1e-6):
     torch.nn.init.constant_(layer.bias, bias_const)
 
 class ActorGaussian(nn.Module):
-    def __init__(self, state_dim, hidden_dim, output_dim):
+    def __init__(self, hidden_dim, output_dim):
         super().__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.mean = nn.Linear(hidden_dim, output_dim)
-        self.log_std = nn.Linear(hidden_dim, output_dim)
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=8, stride=4)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
+        # self.fc1 = nn.Linear(10, hidden_dim)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        layer_norm(self.fc1, std=1.0)
-        layer_norm(self.fc2, std=1.0)
-        layer_norm(self.mean, std=1.0)
-        layer_norm(self.log_std, std=1.0)
+        # DQN raw network
+        # out = layers.convolution2d(out, num_outputs=64, kernel_size=4, stride=2, activation_fn=tf.nn.relu)
+        # out = layers.convolution2d(out, num_outputs=64, kernel_size=3, stride=1, activation_fn=tf.nn.relu)
+        # out = layers.convolution2d(out, num_outputs=32, kernel_size=8, stride=4, activation_fn=tf.nn.relu)
+        # out = layers.flatten(out)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        print (f'size {x.size()}')
+        assert 0
         mean = self.mean(x)
         log_std = self.log_std(x)
         log_std = torch.clamp(log_std, min=-20, max=2)
         return mean, log_std
     
-    def action(self, state):
+    def choose_action(self, state, test=False):
+        state = torch.FloatTensor(state).to(self.device)
         mean, log_std = self.forward(state)
         if test:
             return mean.detach().cpu().numpy()
@@ -74,7 +76,6 @@ class ActorGaussian(nn.Module):
         
         z = normal.sample()
         action = torch.tanh(z).detach().cpu().numpy()
-        action = action * action_scale + action_bias
         return action
 
     # Use re-parameterization tick
@@ -128,7 +129,7 @@ class ValueNet(nn.Module):
 
         return x
 
-actor = ActorGaussian(state_space, hidden_dim, action_space)
+actor = ActorGaussian(hidden_dim, action_space)
 critic = CriticQTwin(state_space, hidden_dim, action_space)
 value_net = ValueNet(state_space)
 # buffer = Buffer(buffer_size)

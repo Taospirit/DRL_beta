@@ -4,8 +4,9 @@ import os
 import time
 import matplotlib.pyplot as plt
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
-from drl.model import ActorDPG, CriticQ
+# from drl.model import ActorDPG, CriticQ
 from drl.algorithm import DDPG
 
 env_name = 'Pendulum-v0'
@@ -32,12 +33,49 @@ model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
 save_file = model_save_dir.split('/')[-1]
 os.makedirs(model_save_dir, exist_ok=True)
 
+
+class ActorDPG(nn.Module):
+    def __init__(self, state_dim, hidden_dim, action_dim):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(state_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, action_dim), nn.Tanh(), )
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    def forward(self, state):
+        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        action = self.net(state)
+        return action
+
+    def predict(self, state, action_max, noise_std=0, noise_clip=0.5):
+        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        action = self.net(state)
+        if noise_std:
+            noise_norm = torch.ones_like(action).data.normal_(0, noise_std).to(self.device)
+            action += noise_norm.clamp(-noise_clip, noise_clip)
+
+        action = action.clamp(-action_max, action_max)
+        return action
+
+class CriticQ(nn.Module):
+    def __init__(self, state_dim, hidden_dim, action_dim):
+        super().__init__()
+        # inpur_dim = state_dim + action_dim, 
+        self.net = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, 1), )
+        # self.net = build_critic_network(state_dim, hidden_dim, action_dim)
+
+    def forward(self, state, action):
+        input = torch.cat((state, action), dim=1)
+        q_value = self.net(input)
+        return q_value
+
 actor = ActorDPG(state_space, hidden_dim, action_space)
 critic = CriticQ(state_space, hidden_dim, action_space)
 # buffer = Buffer(buffer_size)
 policy = DDPG(actor, critic, action_max=action_max, buffer_size=buffer_size,
               actor_learn_freq=actor_learn_freq, target_update_freq=target_update_freq, batch_size=batch_size)
-
 
 def sample(env, policy, max_step, test=False):
     assert env, 'You must set env for sample'
@@ -48,7 +86,8 @@ def sample(env, policy, max_step, test=False):
         action = policy.choose_action(state, test)
         action *= env.action_space.high[0]
         next_state, reward, done, info = env.step([action])
-        env.render()
+        if test:
+            env.render()
         # process env callback
         if not test:
             mask = 0 if done else 1
@@ -60,15 +99,16 @@ def sample(env, policy, max_step, test=False):
         state = next_state
 
     if not test:
-        policy.learn()
-    return reward_avg/(step+1), step
+        pg_loss, v_loss = policy.learn()
+        return reward_avg/(step+1), step, pg_loss, v_loss
+    return reward_avg/(step+1), step, 0, 0
 
 
 run_type = ['train', 'eval']
 run = run_type[0]
 plot_name = 'DDPG_TwoNet_Double'
 
-
+writer = SummaryWriter('./logs/ddpg')
 def main():
     test = False
     if run == 'eval':
@@ -90,12 +130,16 @@ def main():
 
     live_time = []
     for i_eps in range(episodes):
-        rewards, step = sample(env, policy, max_step, test=test)
+        rewards, step, pg_loss, v_loss = sample(env, policy, max_step, test=test)
         if run == 'eval':
             print(f'Eval eps:{i_eps+1}, Rewards:{rewards}, Steps:{step+1}')
             continue
         live_time.append(rewards)
-        policy_test.plot(live_time, plot_name, model_save_dir)
+        # policy_test.plot(live_time, plot_name, model_save_dir)
+
+        writer.add_scalar('reward', rewards, global_step=i_eps)
+        writer.add_scalar('loss/pg', pg_loss, global_step=i_eps)
+        writer.add_scalar('loss/v', v_loss, global_step=i_eps)
 
         if i_eps > 0 and i_eps % 100 == 0:
             print(f'i_eps is {i_eps}')

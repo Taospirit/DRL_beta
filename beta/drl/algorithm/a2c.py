@@ -14,12 +14,12 @@ from drl.utils import ReplayBuffer
 class A2C(BasePolicy): #option: double
     def __init__(
         self, 
-        actor_net, 
-        critic_net,
+        model, 
+        # critic_net,
         buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
-        target_update_tau=5e-3,
+        target_update_tau=0.5,
         learning_rate=0.01,
         discount_factor=0.99,
         gae_lamda=1, # mc
@@ -43,8 +43,8 @@ class A2C(BasePolicy): #option: double
         self.buffer = ReplayBuffer(buffer_size, replay=False)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.actor_eval = actor_net.to(self.device)
-        self.critic_eval = critic_net.to(self.device)
+        self.actor_eval = model.policy_net.to(self.device)
+        self.critic_eval = model.value_net.to(self.device)
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
         
@@ -59,6 +59,7 @@ class A2C(BasePolicy): #option: double
 
     def choose_action(self, state, test=False):
         state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        # state = state.unsqueeze(0)
         if test:
             self.actor_eval.eval()
             return Categorical(self.actor_eval(state)).sample().item(), 0
@@ -72,12 +73,19 @@ class A2C(BasePolicy): #option: double
         return action.item(), log_prob
 
     def learn(self):
+        pg_loss, v_loss = 0, 0
         memory_split = self.buffer.split(self.buffer.all_memory()) # s, r, l, m
         S = torch.tensor(memory_split['s'], dtype=torch.float32, device=self.device)
         R = torch.tensor(memory_split['r'], dtype=torch.float32).view(-1, 1)
         M = torch.tensor(memory_split['m'], dtype=torch.float32).view(-1, 1)
-        Log = torch.stack(memory_split['l']).view(-1, 1)
-    
+        Log = torch.stack(list(memory_split['l'])).view(-1, 1)
+        print (f'Size {S.size()}')
+        # Log = torch.stack(torch.from_numpy(memory_split['l'])).view(-1, 1)
+        # L = memory_split['l']
+        # print (L)
+        # print (Log)
+        # print (L.shape)
+        # assert 0
         v_eval = self.critic_eval(S)
 
         v_evals = v_eval.detach().cpu().numpy()
@@ -89,6 +97,7 @@ class A2C(BasePolicy): #option: double
         v_target = advantage + v_eval.detach()
         # critic_core
         critic_loss = self.criterion(v_eval, v_target)
+        v_loss += critic_loss.item()
         self.critic_eval_optim.zero_grad()
         critic_loss.backward()
         self.critic_eval_optim.step()
@@ -97,6 +106,7 @@ class A2C(BasePolicy): #option: double
         if self._learn_critic_cnt % self.actor_learn_freq == 0:
             # actor_core
             actor_loss = (-Log * advantage).sum()
+            pg_loss += actor_loss.item()
             self.actor_eval.train()
             self.actor_eval_optim.zero_grad()
             actor_loss.backward()
@@ -112,3 +122,5 @@ class A2C(BasePolicy): #option: double
         
         self.buffer.clear()
         assert self.buffer.is_empty()
+        return pg_loss, v_loss
+        
