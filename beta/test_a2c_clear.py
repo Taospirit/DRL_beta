@@ -66,7 +66,7 @@ model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
 save_file = model_save_dir.split('/')[-1]
 os.makedirs(model_save_dir, exist_ok=True)
 
-writer = SummaryWriter(os.path.dirname(model_save_dir)+'/logs/5')
+writer = SummaryWriter(os.path.dirname(model_save_dir)+'/logs/a2c_1')
 train = True
 def main():
     if not train:

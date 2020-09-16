@@ -71,7 +71,7 @@ class SAC2(BasePolicy):
         return action
 
     def learn(self):
-        pg_loss, q_loss = 0, 0
+        pg_loss, q_loss, a_loss = 0, 0, 0
         for _ in range(self._update_iteration):
             batch_split = self.buffer.split_batch(self._batch_size)
             S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device)
@@ -90,7 +90,6 @@ class SAC2(BasePolicy):
             # q_loss
             q1_eval, q2_eval = self.critic_eval(S, A)
             critic_loss = self.criterion(q1_eval, q_target) + self.criterion(q2_eval, q_target)
-            q_loss += critic_loss * 0.5
 
             self.critic_eval_optim.zero_grad()
             critic_loss.backward()
@@ -115,6 +114,12 @@ class SAC2(BasePolicy):
                 self.alpha_optim.step()
                 self.alpha = float(self.log_alpha.exp().detach().cpu().numpy())
 
+            q_loss += critic_loss.item() * 0.5
+            pg_loss += actor_loss.item()
+            a_loss += alpha_loss.item()
+
             if self._learn_critic_cnt % self.target_update_freq:
                 self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
                 self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
+        
+        return pg_loss, q_loss, a_loss

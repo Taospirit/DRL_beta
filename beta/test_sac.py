@@ -65,7 +65,7 @@ class ActorGaussian(nn.Module):
         log_std = torch.clamp(log_std, min=-20, max=2)
         return mean, log_std
     
-    def action(self, state):
+    def action(self, state, test=False):
         mean, log_std = self.forward(state)
         if test:
             return mean.detach().cpu().numpy()
@@ -184,14 +184,14 @@ def main():
         print('Setting your run type!')
         return 0
 
-    # live_time = []
+    live_time = []
     for i_eps in range(episodes):
         rewards, step, pg_loss, v_loss, q_loss = sample(env, policy, max_step, test=test)
         if run == 'eval':
             print(f'Eval eps:{i_eps+1}, Rewards:{rewards}, Steps:{step+1}')
             continue
-        # live_time.append(rewards)
-        # policy_test.plot(live_time, plot_name, model_save_dir
+        live_time.append(rewards)
+        policy_test.plot(live_time, plot_name, model_save_dir)
 
         writer.add_scalar('reward', rewards, global_step=i_eps)
         writer.add_scalar('loss/pg', pg_loss, global_step=i_eps)
