@@ -4,6 +4,9 @@ import os
 import time
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from collections import namedtuple
 
 from drl.model import ActorPPO, CriticV
 from drl.algorithm import PPO
@@ -51,6 +54,19 @@ class ActorPPO(nn.Module):
         sigma = F.softplus(self.sigma_head(x))
         return mu, sigma
 
+    def action(self, state, test=False):
+        with torch.no_grad():
+            mu, sigma = self.actor_eval(state)
+        dist = Normal(mu, sigma)
+        action = dist.sample()
+        # print (f'mu:{mu}, sigma:{sigma}, dist: {dist}, action sample before clamp: {action}')
+        action = action.clamp(-action_max, action_max)
+        # print (f'action after clamp {action}')
+        log_prob = dist.log_prob(action)
+        assert abs(action.item()) <= action_max, f'ERROR: action out of {action}'
+
+        return action.item(), log_prob.item()
+
 class CriticV(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, layer_norm=False):
         super().__init__()
@@ -65,10 +81,11 @@ class CriticV(nn.Module):
         state_value = self.value_head(x)
         return state_value
 
+model = namedtuple('model', ['policy_net', 'value_net'])
 actor = ActorPPO(state_space, hidden_dim, action_space)
 critic = CriticV(state_space, hidden_dim, action_space)
-policy = PPO(actor, critic, buffer_size=buffer_size,
-             actor_learn_freq=actor_learn_freq, target_update_freq=target_update_freq)
+model = model(actor, critic)
+policy = PPO(model, buffer_size=32, actor_learn_freq=1, target_update_freq=0)
 
 
 def sample(env, policy, max_step, i_episode=0, num_episode=100, test=False):

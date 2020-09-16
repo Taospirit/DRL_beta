@@ -15,7 +15,7 @@ from drl.utils import ReplayBuffer
 class DQN(BasePolicy):  # navie DQN
     def __init__(
         self,
-        critic_net,
+        model,
         action_shape=0,
         buffer_size=1000,
         batch_size=100,
@@ -43,11 +43,11 @@ class DQN(BasePolicy):  # navie DQN
         self.buffer = ReplayBuffer(buffer_size)
 
         # self.declare_networks()
-        self.critic_eval = critic_net.to(self.device)
+        self.critic_eval = model.value_net.to(self.device).train()
         self.critic_target = self.copy_net(self.critic_eval)
 
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
-        self.critic_eval.train()
+        # self.critic_eval.train()
 
         self.criterion = nn.MSELoss()
 
@@ -56,19 +56,19 @@ class DQN(BasePolicy):  # navie DQN
 
     def choose_action(self, state, test=False):
         state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
-        q_values = self.critic_eval(state)
-        action = q_values.argmax(dim=1).cpu().data.numpy()
-        action = action[0] if self.action_shape == 0 else action.reshape(self.action_shape)  # return the argmax index
+        # q_values = self.critic_eval(state)
+        # action = q_values.argmax(dim=1).cpu().data.numpy()
+        # action = action[0] if self.action_shape == 0 else action.reshape(self.action_shape)  # return the argmax index
 
-        if test:
-            self.epsilon = 1.0
-        if np.random.randn() >= self.epsilon:  # epsilon-greedy
-            self.random_choose += 1
-            action = np.random.randint(0, q_values.size()[-1])
-            action = action if self.action_shape == 0 else action.reshape(self.action_shape)
+        # if test:
+        #     self.epsilon = 1.0
+        # if np.random.randn() >= self.epsilon:  # epsilon-greedy
+        #     self.random_choose += 1
+        #     action = np.random.randint(0, q_values.size()[-1])
+        #     action = action if self.action_shape == 0 else action.reshape(self.action_shape)
 
-        self.sum_choose += 1
-        return action
+        # self.sum_choose += 1
+        return self.critic_eval.action(state)
 
     def learn(self):
         for _ in range(self._update_iteration):

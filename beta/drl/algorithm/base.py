@@ -29,7 +29,13 @@ class BasePolicy(ABC):
         model_ = deepcopy(model)
         model_.load_state_dict(model.state_dict())
         return model_.eval()
-    
+
+    def choose_action(self, state, test=False):
+        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        if test:
+            self.actor_eval.eval()
+        return self.actor_eval.action(state)
+
     def save_model(self, save_dir, save_file_name, save_actor=False, save_critic=False):
         assert isinstance(save_dir, str) and isinstance(save_file_name, str)
         os.makedirs(save_dir, exist_ok=True)

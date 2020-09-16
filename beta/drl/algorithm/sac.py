@@ -14,9 +14,8 @@ from drl.utils import ReplayBuffer
 class SAC(BasePolicy):
     def __init__(
         self, 
-        actor_net, 
-        critic_net,
-        v_net,
+        model,
+        # v_net,
         buffer_size=1000,
         batch_size=100,
         actor_learn_freq=1,
@@ -48,9 +47,9 @@ class SAC(BasePolicy):
         self.buffer = ReplayBuffer(buffer_size) # off-policy
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.actor_eval = actor_net.to(self.device).train()
-        self.critic_eval = critic_net.to(self.device).train()
-        self.value_eval = v_net.to(self.device).train()
+        self.actor_eval = model.policy_net.to(self.device).train()
+        self.critic_eval = model.value_net.to(self.device).train()
+        self.value_eval = model.v_net.to(self.device).train()
 
         self.value_target = self.copy_net(self.value_eval)
         
@@ -60,10 +59,10 @@ class SAC(BasePolicy):
 
         self.criterion = nn.SmoothL1Loss()
     
-    def choose_action(self, state, test=False):
-        state = torch.tensor(state, dtype=torch.float32, device=self.device)
-        action = self.actor_eval.action(state)
-        return action
+    # def choose_action(self, state, test=False):
+    #     state = torch.tensor(state, dtype=torch.float32, device=self.device)
+    #     action = self.actor_eval.action(state)
+    #     return action
 
     def learn(self):
         pg_loss, v_loss, q_loss = 0, 0, 0

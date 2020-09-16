@@ -4,6 +4,8 @@ import os
 import time
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 # from drl.model import ActorNet, CriticDQN
 from drl.algorithm import DQN
@@ -61,6 +63,21 @@ class CriticDQN(nn.Module):
 
         q_value = self.q_value(x)
         return q_value
+
+    def action(self, state, test=False):
+        q_values = self.critic_eval(state)
+        action = q_values.argmax(dim=1).cpu().data.numpy()
+        action = action[0] if self.action_shape == 0 else action.reshape(self.action_shape)  # return the argmax index
+
+        if test:
+            self.epsilon = 1.0
+        if np.random.randn() >= self.epsilon:  # epsilon-greedy
+            self.random_choose += 1
+            action = np.random.randint(0, q_values.size()[-1])
+            action = action if self.action_shape == 0 else action.reshape(self.action_shape)
+
+        self.sum_choose += 1
+        return action
 
 critic = CriticDQN(state_space, hidden_dim, action_space)
 policy = DQN(critic, action_shape=action_shape, buffer_size=buffer_size, batch_size=batch_size, target_update_freq=100)

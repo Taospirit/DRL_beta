@@ -15,8 +15,7 @@ from drl.utils import ReplayBuffer
 class PPO(BasePolicy):  # option: double
     def __init__(
         self,
-        actor_net,
-        critic_net,
+        model,
         buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
@@ -55,13 +54,13 @@ class PPO(BasePolicy):  # option: double
         self.buffer = ReplayBuffer(buffer_size, replay=False)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.actor_eval = actor_net.to(self.device)
-        self.critic_eval = critic_net.to(self.device)
+        self.actor_eval = model.policy_net.to(self.device).train()
+        self.critic_eval = model.value_net.to(self.device).train()
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
 
-        self.actor_eval.train()
-        self.critic_eval.train()
+        # self.actor_eval.train()
+        # self.critic_eval.train()
 
         if self._target:
             self.actor_target = self.copy_net(self.actor_eval)
@@ -69,21 +68,21 @@ class PPO(BasePolicy):  # option: double
 
         self.criterion = nn.SmoothL1Loss()
 
-    def choose_action(self, state, test=False):
-        state = torch.tensor(state, dtype=torch.float32, device=self.device)
-        if test:
-            self.actor_eval.eval()
-        with torch.no_grad():
-            mu, sigma = self.actor_eval(state)
-        dist = Normal(mu, sigma)
-        action = dist.sample()
-        # print (f'mu:{mu}, sigma:{sigma}, dist: {dist}, action sample before clamp: {action}')
-        action = action.clamp(-2, 2)
-        # print (f'action after clamp {action}')
-        log_prob = dist.log_prob(action)
-        assert abs(action.item()) <= 2, f'ERROR: action out of {action}'
-
-        return action.item(), log_prob.item()
+    # def choose_action(self, state, test=False):
+    #     state = torch.tensor(state, dtype=torch.float32, device=self.device)
+    #     # if test:
+    #     #     self.actor_eval.eval()
+    #     # with torch.no_grad():
+    #     #     mu, sigma = self.actor_eval(state)
+    #     # dist = Normal(mu, sigma)
+    #     # action = dist.sample()
+    #     # # print (f'mu:{mu}, sigma:{sigma}, dist: {dist}, action sample before clamp: {action}')
+    #     # action = action.clamp(-2, 2)
+    #     # # print (f'action after clamp {action}')
+    #     # log_prob = dist.log_prob(action)
+    #     # assert abs(action.item()) <= 2, f'ERROR: action out of {action}'
+    #     # return action.item(), log_prob.item()
+    #     return self.actor_eval.action(state)
 
     # # not use
     # def get_batchs_indices(self, buffer_size, batch_size, replace=True, batch_num=None):

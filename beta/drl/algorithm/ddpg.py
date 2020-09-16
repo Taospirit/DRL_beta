@@ -14,8 +14,7 @@ from drl.utils import ReplayBuffer
 class DDPG(BasePolicy):
     def __init__(
         self,
-        actor_net,
-        critic_net,
+        model,
         buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
@@ -24,7 +23,6 @@ class DDPG(BasePolicy):
         discount_factor=0.99,
         batch_size=100,
         verbose=False,
-        action_max=1
     ):
         super().__init__()
         self.lr = learning_rate
@@ -45,28 +43,26 @@ class DDPG(BasePolicy):
         self.buffer = ReplayBuffer(buffer_size)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.actor_eval = actor_net.to(self.device)  # pi(s)
-        self.critic_eval = critic_net.to(self.device)  # Q(s, a)
+        self.actor_eval = model.policy_net.to(self.device).train()  # pi(s)
+        self.critic_eval = model.value_net.to(self.device).train()  # Q(s, a)
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
 
-        self.actor_eval.train()
-        self.critic_eval.train()
+        # self.actor_eval.train()
+        # self.critic_eval.train()
 
         if self._target:
             self.actor_target = self.copy_net(self.actor_eval)
             self.critic_target = self.copy_net(self.critic_eval)
 
         self.criterion = nn.MSELoss()  # why mse?
-        self.action_max = action_max
+        # self.action_max = action_max
 
-    def choose_action(self, state, test=False):
-        if test:
-            self.actor_eval.eval()
-        # action = self.actor_eval(state) # out = tanh(x)
-        # action = action.clamp(-self.action_max, self.action_max)
-        # return action.item()
-        return self.actor_eval.predict(state, self.action_max).item()
+    # def choose_action(self, state, test=False):
+    #     state = torch.tensor(state, dtype=torch.float32, device=self.device)
+    #     if test:
+    #         self.actor_eval.eval()
+    #     return self.actor_eval.action(state)
 
     def learn(self):
         loss_actor_avg, loss_critic_avg = 0, 0

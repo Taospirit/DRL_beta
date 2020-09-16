@@ -14,8 +14,7 @@ from drl.utils import ReplayBuffer
 class TD3(BasePolicy):
     def __init__(
         self,
-        actor_net,
-        critic_net,
+        model,
         buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=1,
@@ -45,10 +44,14 @@ class TD3(BasePolicy):
         self.buffer = ReplayBuffer(buffer_size)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.actor_eval = actor_net.to(self.device).train()
+
+        self.actor_eval = model.policy_net.to(self.device).train()
+        self.critic_eval = model.value_net.to(self.device).train()
+
+        # self.actor_eval = actor_net.to(self.device).train()
         # self.critic_1 = critic_net.to(self.device)  # two Q net
         # self.critic_2 = deepcopy(critic_net).to(self.device)
-        self.critic_eval = critic_net.to(self.device).train() # CriticQTwin
+        # self.critic_eval = critic_net.to(self.device).train() # CriticQTwin
 
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         # self.critic_1_optim = optim.Adam(self.critic_1.parameters(), lr=self.lr)
@@ -68,15 +71,15 @@ class TD3(BasePolicy):
 
         self.noise_clip = 0.5
         self.noise_std = 0.2
-        self.action_max = action_max
+        # self.action_max = action_max
 
-    def choose_action(self, state, test=False):
-        if test:
-            self.actor_eval.eval()
-        # action = self.actor_eval(state) # out = tanh(x)
-        # action = action.clamp(-self.action_max, self.action_max)
-        # return action.item()
-        return self.actor_eval.predict(state, self.action_max).item()
+    # def choose_action(self, state, test=False):
+    #     if test:
+    #         self.actor_eval.eval()
+    #     # action = self.actor_eval(state) # out = tanh(x)
+    #     # action = action.clamp(-self.action_max, self.action_max)
+    #     # return action.item()
+    #     return self.actor_eval.predict(state, self.action_max).item()
 
     def learn(self):
         loss_actor_avg, loss_critic_avg = 0, 0

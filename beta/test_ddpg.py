@@ -4,7 +4,12 @@ import os
 import time
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 from torch.utils.tensorboard import SummaryWriter
+from torch.distributions import Categorical
+from collections import namedtuple
 
 # from drl.model import ActorDPG, CriticQ
 from drl.algorithm import DDPG
@@ -43,19 +48,18 @@ class ActorDPG(nn.Module):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     def forward(self, state):
-        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        # state = torch.tensor(state, dtype=torch.float32, device=self.device)
         action = self.net(state)
         return action
 
-    def predict(self, state, action_max, noise_std=0, noise_clip=0.5):
-        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+    def action(self, state, noise_std=0, noise_clip=0.5):
         action = self.net(state)
         if noise_std:
             noise_norm = torch.ones_like(action).data.normal_(0, noise_std).to(self.device)
             action += noise_norm.clamp(-noise_clip, noise_clip)
 
         action = action.clamp(-action_max, action_max)
-        return action
+        return action.item()
 
 class CriticQ(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
@@ -71,11 +75,11 @@ class CriticQ(nn.Module):
         q_value = self.net(input)
         return q_value
 
+model = namedtuple('model', ['policy_net', 'value_net'])
 actor = ActorDPG(state_space, hidden_dim, action_space)
 critic = CriticQ(state_space, hidden_dim, action_space)
-# buffer = Buffer(buffer_size)
-policy = DDPG(actor, critic, action_max=action_max, buffer_size=buffer_size,
-              actor_learn_freq=actor_learn_freq, target_update_freq=target_update_freq, batch_size=batch_size)
+model = model(actor, critic)
+policy = DDPG(model, buffer_size=50000, actor_learn_freq=1, target_update_freq=10, batch_size=1000)
 
 def sample(env, policy, max_step, test=False):
     assert env, 'You must set env for sample'
@@ -135,7 +139,7 @@ def main():
             print(f'Eval eps:{i_eps+1}, Rewards:{rewards}, Steps:{step+1}')
             continue
         live_time.append(rewards)
-        # policy_test.plot(live_time, plot_name, model_save_dir)
+        policy_test.plot(live_time, plot_name, model_save_dir)
 
         writer.add_scalar('reward', rewards, global_step=i_eps)
         writer.add_scalar('loss/pg', pg_loss, global_step=i_eps)

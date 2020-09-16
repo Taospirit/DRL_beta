@@ -1,6 +1,8 @@
 import gym, os, time
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 # from drl.model import ActorDPG, CriticQTwin
@@ -43,8 +45,7 @@ class ActorDPG(nn.Module):
         action = self.net(state)
         return action
 
-    def predict(self, state, action_max, noise_std=0, noise_clip=0.5):
-        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+    def action(self, state, action_max, noise_std=0, noise_clip=0.5):
         action = self.net(state)
         if noise_std:
             noise_norm = torch.ones_like(action).data.normal_(0, noise_std).to(self.device)

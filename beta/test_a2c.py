@@ -4,12 +4,16 @@ import os
 import time
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 from drl.model import ActorNet, CriticV
 from drl.algorithm import A2C
 from drl.utils import ReplayBuffer as Buffer
+from collections import namedtuple
 
+model = namedtuple('model', ['policy_net', 'value_net'])
 env_name = 'CartPole-v0'
 env = gym.make(env_name)
 env = env.unwrapped
@@ -42,10 +46,18 @@ class ActorNet(nn.Module):
         action_score = self.action_head(x)
         dist = F.softmax(action_score, dim=-1)
         return dist
+    
+    def action(self, state, test=False):
+        if test:
+            self.actor_eval.eval()
+            return Categorical(self.actor_eval(state)).sample().item(), 0
+        
+        dist = self.forward(state)
+        m = Categorical(dist)
+        action = m.sample()
+        log_prob = m.log_prob(action)
 
-    def choose_action(self, state):
-        # todo
-        pass
+        return action.item(), log_prob
 
 
 class CriticV(nn.Module):

@@ -15,7 +15,6 @@ class A2C(BasePolicy): #option: double
     def __init__(
         self, 
         model, 
-        # critic_net,
         buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
@@ -43,13 +42,13 @@ class A2C(BasePolicy): #option: double
         self.buffer = ReplayBuffer(buffer_size, replay=False)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.actor_eval = model.policy_net.to(self.device)
-        self.critic_eval = model.value_net.to(self.device)
+        self.actor_eval = model.policy_net.to(self.device).train()
+        self.critic_eval = model.value_net.to(self.device).train()
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
         
-        self.actor_eval.train()
-        self.critic_eval.train()
+        # self.actor_eval.train()
+        # self.critic_eval.train()
 
         if self._target:
             self.actor_target = self.copy_net(self.actor_eval)
@@ -57,20 +56,21 @@ class A2C(BasePolicy): #option: double
 
         self.criterion = nn.SmoothL1Loss()
 
-    def choose_action(self, state, test=False):
-        state = torch.tensor(state, dtype=torch.float32, device=self.device)
-        # state = state.unsqueeze(0)
-        if test:
-            self.actor_eval.eval()
-            return Categorical(self.actor_eval(state)).sample().item(), 0
+    # def choose_action(self, state, test=False):
+    #     state = torch.tensor(state, dtype=torch.float32, device=self.device)
+    #     # # state = state.unsqueeze(0)
+    #     # if test:
+    #     #     self.actor_eval.eval()
+    #     #     return Categorical(self.actor_eval(state)).sample().item(), 0
         
-        dist = self.actor_eval(state)
-        m = Categorical(dist)
-        action = m.sample()
-        log_prob = m.log_prob(action)
-        state_value = self.critic_eval(state)
+    #     # dist = self.actor_eval(state)
+    #     # m = Categorical(dist)
+    #     # action = m.sample()
+    #     # log_prob = m.log_prob(action)
+    #     # state_value = self.critic_eval(state)
 
-        return action.item(), log_prob
+    #     # return action.item(), log_prob
+    #     return self.actor_eval.action(state)
 
     def learn(self):
         pg_loss, v_loss = 0, 0
@@ -79,13 +79,7 @@ class A2C(BasePolicy): #option: double
         R = torch.tensor(memory_split['r'], dtype=torch.float32).view(-1, 1)
         M = torch.tensor(memory_split['m'], dtype=torch.float32).view(-1, 1)
         Log = torch.stack(list(memory_split['l'])).view(-1, 1)
-        print (f'Size {S.size()}')
-        # Log = torch.stack(torch.from_numpy(memory_split['l'])).view(-1, 1)
-        # L = memory_split['l']
-        # print (L)
-        # print (Log)
-        # print (L.shape)
-        # assert 0
+
         v_eval = self.critic_eval(S)
 
         v_evals = v_eval.detach().cpu().numpy()
