@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from drl.model import ActorNet, CriticV
@@ -74,9 +75,12 @@ class CriticV(nn.Module):
         state_value = self.value_head(x)
         return state_value
 
+from collections import namedtuple
+model = namedtuple('model', ['policy_net', 'value_net'])
 actor = ActorNet(state_space, hidden_dim, action_space)
 critic = CriticV(state_space, hidden_dim, 1)
-policy = A2C(actor, critic, buffer_size=max_step, actor_learn_freq=actor_learn_freq,
+model = model(actor, critic)
+policy = A2C(model, buffer_size=max_step, actor_learn_freq=actor_learn_freq,
              target_update_freq=target_update_freq)
 
 def sample(env, policy, max_step, test=False):

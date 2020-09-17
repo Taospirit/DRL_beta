@@ -47,30 +47,11 @@ class A2C(BasePolicy): #option: double
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
         
-        # self.actor_eval.train()
-        # self.critic_eval.train()
-
         if self._target:
             self.actor_target = self.copy_net(self.actor_eval)
             self.critic_target = self.copy_net(self.critic_eval)
 
         self.criterion = nn.SmoothL1Loss()
-
-    # def choose_action(self, state, test=False):
-    #     state = torch.tensor(state, dtype=torch.float32, device=self.device)
-    #     # # state = state.unsqueeze(0)
-    #     # if test:
-    #     #     self.actor_eval.eval()
-    #     #     return Categorical(self.actor_eval(state)).sample().item(), 0
-        
-    #     # dist = self.actor_eval(state)
-    #     # m = Categorical(dist)
-    #     # action = m.sample()
-    #     # log_prob = m.log_prob(action)
-    #     # state_value = self.critic_eval(state)
-
-    #     # return action.item(), log_prob
-    #     return self.actor_eval.action(state)
 
     def learn(self):
         pg_loss, v_loss = 0, 0
