@@ -87,7 +87,7 @@ class SAC(BasePolicy):
             target_value = self.value_target(S_)
             target_q_value = R + M * self._gamma * target_value.cpu()
             target_q_value = target_q_value.to(self.device)
-            qvalue_loss = 0.5 * (self.criterion(q1_value, target_q_value.detach()) + self.criterion(q2_value, target_q_value.detach()))
+            q_value_loss = 0.5 * (self.criterion(q1_value, target_q_value.detach()) + self.criterion(q2_value, target_q_value.detach()))
 
             # policy loss
             policy_loss = (log_prob - torch.min(new_q1_value, new_q2_value)).mean()
@@ -100,7 +100,7 @@ class SAC(BasePolicy):
 
             # update soft Q
             self.critic_eval_optim.zero_grad()
-            qvalue_loss.backward()
+            q_value_loss.backward()
             self.critic_eval_optim.step()
             self._learn_critic_cnt += 1
 
@@ -111,7 +111,7 @@ class SAC(BasePolicy):
 
             pg_loss += policy_loss.item()
             v_loss += value_loss.item()
-            q_loss += qvalue_loss.item()
+            q_loss += q_value_loss.item()
 
             if self._learn_critic_cnt % self.target_update_freq:
                 self.soft_sync_weight(self.value_target, self.value_eval, self.tau)
