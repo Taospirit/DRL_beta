@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 from torch.utils.tensorboard import SummaryWriter
+from collections import namedtuple
 
 # from drl.model import ActorGaussian, CriticQ
 from drl.algorithm import SAC2 as SAC
@@ -125,14 +126,15 @@ class ValueNet(nn.Module):
         x = F.relu(self.linear1(state))
         x = F.relu(self.linear2(x))
         x = self.linear3(x)
-
         return x
 
+model = namedtuple('model', ['policy_net', 'value_net', 'v_net'])
 actor = ActorGaussian(state_space, hidden_dim, action_space)
 critic = CriticQTwin(state_space, hidden_dim, action_space)
-value_net = ValueNet(state_space)
+v_net = ValueNet(state_space)
+model = model(actor, critic, v_net)
 # buffer = Buffer(buffer_size)
-policy = SAC(actor, critic, value_net, action_space=env.action_space, buffer_size=buffer_size,
+policy = SAC(model, action_space=env.action_space, buffer_size=buffer_size,
               actor_learn_freq=actor_learn_freq, target_update_freq=target_update_freq, batch_size=batch_size)
 
 def sample(env, policy, max_step, test=False):

@@ -30,9 +30,8 @@ class DQN(BasePolicy):  # navie DQN
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.eps = np.finfo(np.float32).eps.item()
         self.tau = target_update_tau
-        self.epsilon = 0.5
         self.target_update_freq = target_update_freq
-        self.action_shape = action_shape
+        # self.action_shape = action_shape
         self._gamma = discount_factor
         self._batch_size = batch_size
         self._verbose = verbose
@@ -100,8 +99,6 @@ class DQN(BasePolicy):  # navie DQN
                 if self._verbose:
                     print(f'=======Soft_sync_weight of DQN=======')
                 self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
-                self.epsilon += 0.01
-                self.epsilon = min(self.epsilon, 1.0)
         # print (f'Random {self.random_choose}, Sum {self.sum_choose}, ratio {self.random_choose/self.sum_choose}, epsilon {self.epsilon}')
 
     def get_max_action(self, next_state):

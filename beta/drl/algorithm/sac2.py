@@ -66,11 +66,6 @@ class SAC2(BasePolicy):
         self.alpha_optim = optim.Adam([self.log_alpha], lr=self.lr)
         self.alpha = self.log_alpha.exp()
 
-    # def choose_action(self, state, test=False):
-    #     state = torch.tensor(state, dtype=torch.float32, device=self.device)
-    #     action = self.actor_eval.action(state)
-    #     return action
-
     def learn(self):
         pg_loss, q_loss, a_loss = 0, 0, 0
         for _ in range(self._update_iteration):

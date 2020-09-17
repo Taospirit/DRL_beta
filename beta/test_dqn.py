@@ -3,14 +3,15 @@ import gym
 import os
 import time
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from collections import namedtuple
 
 # from drl.model import ActorNet, CriticDQN
 from drl.algorithm import DQN
 # from drl.algorithm import DoubleDQN
-from drl.utils import ReplayBuffer as Buffer
 
 env_name = 'CartPole-v0'
 env = gym.make(env_name)
@@ -38,6 +39,7 @@ os.makedirs(model_save_dir, exist_ok=True)
 class CriticDQN(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim, atoms=51, layer_norm=False):
         super().__init__()
+        self.epsilon = 0.5
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.q_value = nn.Linear(hidden_dim, action_dim)
         self.v_value = nn.Linear(hidden_dim, 1)
@@ -65,22 +67,22 @@ class CriticDQN(nn.Module):
         return q_value
 
     def action(self, state, test=False):
-        q_values = self.critic_eval(state)
+        q_values = self.forward(state)
         action = q_values.argmax(dim=1).cpu().data.numpy()
-        action = action[0] if self.action_shape == 0 else action.reshape(self.action_shape)  # return the argmax index
+        action = action[0] if action_shape == 0 else action.reshape(action_shape)  # return the argmax index
 
         if test:
             self.epsilon = 1.0
         if np.random.randn() >= self.epsilon:  # epsilon-greedy
-            self.random_choose += 1
             action = np.random.randint(0, q_values.size()[-1])
-            action = action if self.action_shape == 0 else action.reshape(self.action_shape)
+            action = action if action_shape == 0 else action.reshape(action_shape)
 
-        self.sum_choose += 1
         return action
 
+model = namedtuple('model', ['value_net'])
 critic = CriticDQN(state_space, hidden_dim, action_space)
-policy = DQN(critic, action_shape=action_shape, buffer_size=buffer_size, batch_size=batch_size, target_update_freq=100)
+model = model(critic)
+policy = DQN(model, buffer_size=buffer_size, batch_size=batch_size, target_update_freq=100)
 
 def sample(env, policy, max_step, test=False):
     assert env, 'You must set env for sample'
@@ -90,7 +92,7 @@ def sample(env, policy, max_step, test=False):
     for step in range(max_step):
         action = policy.choose_action(state, test)
         next_state, reward, done, info = env.step(action)
-        env.render()
+        # env.render()
         # process env callback
         if not test:
             mask = 0 if done else 1

@@ -1,6 +1,6 @@
 import numpy as np
 import random
-# from collections import namedtuple
+from collections import namedtuple
 
 class ReplayBuffer(object):
     def __init__(self, size, replay=True):
@@ -62,17 +62,10 @@ class ReplayBuffer(object):
     def all_memory(self):
         return self.memory
 
-class PriorityReplayBuffer(ReplayBuffer):
-    def __init__(self):
-        super().__init__()
-    
-    def append(self, **kwargs):
-        pass
-
 class SegmentTree():
     def __init__(self, size):
         self.index = 0
-        self._size = size
+        self.size = size
         self.sum_tree = np.zeros((2 * size - 1, ), dtype=np.float32)
         self.data = np.array([None] * size)
         self.max = 1
@@ -93,36 +86,99 @@ class SegmentTree():
         else:
             return self._retrieve(r, value - self.sum_tree[l])
 
+    def update(self, index, value):
+        self.sum_tree[index] = value
+        self._propagate(index)
+        self.max = max(value, self.max)
+
     def append(self, data, value):
         self.data[self.index] = data # sefl.data store data
-        # self.update(self.index + self._size - 1, value)
-        tree_index = self.index + self._size - 1
-        self.sum_tree[tree_index] = value # self.sum_tree store value
-        self._propagate(tree_index)
-        # self.max = max(value, self.max)
-        self.index = (self.index + 1) % self._size
-        self.full = self.full or self.index == 0 # ?
+        self.update(self.index + self.size - 1, value)  # Update tree
+        self.index = (self.index + 1) % self.size
+        self.full = self.full or self.index == 0
         self.max = max(value, self.max)
 
     def find(self, value):
         index = self._retrieve(0, value)
         data_index = index - self.size + 1
         return self.sum_tree[index], data_index, index
+        # pi^a, data_index, sum_tree_index
 
     def get(self, data_index):
-        return self.data[data_index % self._size]
+        return self.data[data_index % self.size]
 
     def total(self):
         return self.sum_tree[0]
 
-class Batch(object):
-    def __init__(self, **kwargs):
+Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'mask'))
+class PriorityReplayBuffer(ReplayBuffer):
+    def __init__(self, size, replay=True):
         super().__init__()
-        # print (kwargs)
-        self.__dict__.update(kwargs)
+        self.capacity = size
+        self.history = 4
+        self.discount = 0.99
+        self.n = 3
+        self.priority_weight = 0.4
+        self.priority_exponent = 0.5
+        self.t = 0
+        self.SumTree = SegmentTree(capacity)
 
-    def split(self):
-        pass
+    def append(self, state, action, reward, mask):
+        self.SumTree.append(Transition(self.t, state, action, reward, mask), self.SumTree.max)
+        self.t = 0 if mask self.t + 1
+       
+    def _get_transition(self, idx): # n-step transition
+        transition = np.array([None] * (self.history + self.n))
+        transition[self.history - 1] = self.SumTree.get(idx)
+        for t in range(self.history - 2, -1, -1):
+            if transition[t + 1].timestep == 0:
+                transition[t] = blank_trans
+            else:
+                transition[t] = self.SumTree.get(idx - self.history + 1 + t)
+        for t in range(self.history, self.history + self.n):  # e.g. 4 5 6
+            if transition[t - 1].nonterminal:
+                transition[t] = self.SumTree.get(idx - self.history + 1 + t)
+            else:
+                transition[t] = blank_trans
+        return transition
+
+    def _get_sample_from_segment(self, segment, i):
+        valid = False
+        # to be check
+        while not valid:
+            sample = np.random.uniform(i * segment, (i + 1) * segment)
+            prob, idx, tree_idx = self.SumTree.find(sample)
+            if (self.SumTree.index - idx) % self.capacity > self.n and (idx - self.SumTree.index) % self.capacity >= self.history and prob != 0:
+                valid = True
+
+        transition = self._get_transition(idx)
+        states = [trans.state for trans in transition[:self.history]]
+        next_states = [trans.state for trans in transition[self.n:self.n + self.history]]
+        actions = [trans.action for trans in transition[:self.history]]
+        discounted_rewards = [sum(self.discount ** n * transition[self.history + n - 1].reward for n in range(self.n))]
+        mask = [transition[self.history + self.n - 1].nonterminal]
+
+        return prob, idx, tree_idx, states, actions, discounted_rewards, next_states, mask
+    # todo
+    # def sample(self, batch_size):
+    #     p_total = self.SumTree.total()  # Retrieve sum of all priorities (used to create a normalised probability distribution)
+    #     segment = p_total / batch_size  # Batch size number of segments, based on sum over all probabilities
+    #     batch = [self._get_sample_from_segment(segment, i) for i in range(batch_size)]  # Get batch of valid samples
+    #     probs, idxs, tree_idxs, states, actions, returns, next_states, nonterminals = zip(*batch)
+    #     states, next_states, = torch.stack(states), torch.stack(next_states)
+    #     actions, returns, nonterminals = torch.cat(actions), torch.cat(returns), torch.stack(nonterminals)
+    #     probs = np.array(probs, dtype=np.float32) / p_total  # Calculate normalised probabilities
+    #     capacity = self.capacity if self.SumTree.full else self.SumTree.index
+    #     weights = (capacity * probs) ** -self.priority_weight  # Compute importance-sampling weights w
+    #     weights = torch.tensor(weights / weights.max(), dtype=torch.float32, device=self.device)  # Normalise by max importance-sampling weight from batch
+    #     return tree_idxs, states, actions, returns, next_states, nonterminals, weights
+
+
+    # def update_priorities(self, idxs, priorities):
+    #     priorities = np.power(priorities, self.priority_exponent)
+    #     [self.SumTree.update(idx, priority) for idx, priority in zip(idxs, priorities)]
+
+
 
 class RunningStat(object):
     def __init__(self, shape):
