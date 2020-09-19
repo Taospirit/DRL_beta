@@ -111,7 +111,7 @@ class SegmentTree():
         return self.sum_tree[0]
 
 Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'mask'))
-class PriorityReplayBuffer(ReplayBuffer):
+class PriorityReplayBuffer(object):
     def __init__(self, size, replay=True):
         super().__init__()
         self.capacity = size
@@ -136,7 +136,7 @@ class PriorityReplayBuffer(ReplayBuffer):
             else:
                 transition[t] = self.SumTree.get(idx - self.history + 1 + t)
         for t in range(self.history, self.history + self.n):  # e.g. 4 5 6
-            if transition[t - 1].nonterminal:
+            if transition[t - 1].mask:
                 transition[t] = self.SumTree.get(idx - self.history + 1 + t)
             else:
                 transition[t] = blank_trans
@@ -152,32 +152,30 @@ class PriorityReplayBuffer(ReplayBuffer):
                 valid = True
 
         transition = self._get_transition(idx)
-        states = [trans.state for trans in transition[:self.history]]
-        next_states = [trans.state for trans in transition[self.n:self.n + self.history]]
-        actions = [trans.action for trans in transition[:self.history]]
-        discounted_rewards = [sum(self.discount ** n * transition[self.history + n - 1].reward for n in range(self.n))]
-        mask = [transition[self.history + self.n - 1].nonterminal]
+        state = [trans.state for trans in transition[:self.history]]
+        next_state = [trans.state for trans in transition[self.n:self.n + self.history]]
+        action = [transition[self.history - 1].action]
+        discounted_reward = [sum(self.discount ** n * transition[self.history + n - 1].reward for n in range(self.n))]
+        mask = [transition[self.history + self.n - 1].mask]
 
-        return prob, idx, tree_idx, states, actions, discounted_rewards, next_states, mask
-    # todo
-    # def sample(self, batch_size):
-    #     p_total = self.SumTree.total()  # Retrieve sum of all priorities (used to create a normalised probability distribution)
-    #     segment = p_total / batch_size  # Batch size number of segments, based on sum over all probabilities
-    #     batch = [self._get_sample_from_segment(segment, i) for i in range(batch_size)]  # Get batch of valid samples
-    #     probs, idxs, tree_idxs, states, actions, returns, next_states, nonterminals = zip(*batch)
-    #     states, next_states, = torch.stack(states), torch.stack(next_states)
-    #     actions, returns, nonterminals = torch.cat(actions), torch.cat(returns), torch.stack(nonterminals)
-    #     probs = np.array(probs, dtype=np.float32) / p_total  # Calculate normalised probabilities
-    #     capacity = self.capacity if self.SumTree.full else self.SumTree.index
-    #     weights = (capacity * probs) ** -self.priority_weight  # Compute importance-sampling weights w
-    #     weights = torch.tensor(weights / weights.max(), dtype=torch.float32, device=self.device)  # Normalise by max importance-sampling weight from batch
-    #     return tree_idxs, states, actions, returns, next_states, nonterminals, weights
+        return prob, idx, tree_idx, state, action, discounted_reward, next_state, mask
 
+    def sample(self, batch_size):
+        p_total = self.SumTree.total()
+        segment = p_total / batch_size
+        batch = [self._get_sample_from_segment(segment, i) for i in range(batch_size)]
+        probs, idxs, tree_idxs, states, actions, returns, next_states, masks = zip(*batch)
 
-    # def update_priorities(self, idxs, priorities):
-    #     priorities = np.power(priorities, self.priority_exponent)
-    #     [self.SumTree.update(idx, priority) for idx, priority in zip(idxs, priorities)]
+        probs = np.array(probs, dtype=np.float32) / p_total
+        capacity = self.capacity if self.SumTree.full else self.SumTree.index
+        weights = (capacity * probs) ** -self.priority_weight
+        weights /= weights.max()
 
+        return tree_idxs, states, actions, returns, next_states, masks, weights
+
+    def update_priorities(self, idxs, priorities):
+        priorities = np.power(priorities, self.priority_exponent)
+        [self.SumTree.update(idx, priority) for idx, priority in zip(idxs, priorities)]
 
 
 class RunningStat(object):
