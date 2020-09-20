@@ -25,7 +25,8 @@ class SAC(BasePolicy):
         discount_factor=0.99,
         gae_lamda=1,
         verbose=False,
-        action_space=None
+        update_iteration=10,
+        use_priority=False
         ):
         super().__init__()
         self.lr = learning_rate
@@ -37,7 +38,7 @@ class SAC(BasePolicy):
         self._gamma = discount_factor
         self._gae_lamda = gae_lamda
         self._target = target_update_freq > 0
-        self._update_iteration = 10
+        self._update_iteration = update_iteration
         self._sync_cnt = 0
         # self._learn_cnt = 0
         self._learn_critic_cnt = 0

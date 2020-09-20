@@ -9,13 +9,14 @@ import torch.nn.functional as F
 from torch.distributions import Normal
 from torch.utils.tensorboard import SummaryWriter
 from collections import namedtuple
-
-# from drl.model import ActorGaussian, CriticQ
-from drl.algorithm import SAC2 as SAC
+import numpy as np
+# from drl.model import ActorModel, CriticQ
 # from drl.algorithm import SAC
+from drl.algorithm import SAC2 as SAC
+from utils.plot import plot
 
-
-env_name = 'Pendulum-v0'
+env_list = ['Pendulum-v0', 'MountainCarContinuous-v0', 'Acrobot-v1', 'MountainCar-v0']
+env_name = env_list[0]
 env = gym.make(env_name)
 env = env.unwrapped
 env.seed(1)
@@ -23,29 +24,16 @@ torch.manual_seed(1)
 
 # Parameters
 state_space = env.observation_space.shape[0]
+print (env.action_space)
 action_space = env.action_space.shape[0]
 action_scale = (env.action_space.high - env.action_space.low) / 2
 action_bias = (env.action_space.high + env.action_space.low) / 2
-
-# assert 0
-hidden_dim = 256
-episodes = 5000
-max_step = 300
-buffer_size = 50000
-actor_learn_freq = 1
-target_update_freq = 10
-batch_size = 300
-
-model_save_dir = 'save/test_sac_mac'
-model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
-save_file = model_save_dir.split('/')[-1]
-os.makedirs(model_save_dir, exist_ok=True)
 
 def layer_norm(layer, std=1.0, bias_const=1e-6):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
 
-class ActorGaussian(nn.Module):
+class ActorModel(nn.Module):
     def __init__(self, state_dim, hidden_dim, output_dim):
         super().__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
@@ -65,7 +53,7 @@ class ActorGaussian(nn.Module):
         log_std = self.log_std(x)
         log_std = torch.clamp(log_std, min=-20, max=2)
         return mean, log_std
-    
+
     def action(self, state, test=False):
         mean, log_std = self.forward(state)
         if test:
@@ -91,7 +79,7 @@ class ActorGaussian(nn.Module):
         
         return action, log_prob
 
-class CriticQTwin(nn.Module):
+class CriticModel(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
         # inpur_dim = state_dim + action_dim, 
@@ -109,7 +97,7 @@ class CriticQTwin(nn.Module):
         q2_value = self.net2(input)
         return q1_value, q2_value
 
-class ValueNet(nn.Module):
+class ValueModel(nn.Module):
     def __init__(self, state_dim, edge=3e-3):
         super().__init__()
         self.linear1 = nn.Linear(state_dim, 256)
@@ -128,83 +116,123 @@ class ValueNet(nn.Module):
         x = self.linear3(x)
         return x
 
+file_path = os.path.abspath(os.path.dirname(__file__))
+SAVE_DIR = '/save/test_sac2_'
+LOG_DIR = '/runs'
+POLT_NAME = 'SAC_'
+
+use_priority = True
+if use_priority:
+    SAVE_DIR += 'per_'
+    POLT_NAME += 'per_'
+
+POLT_NAME += env_name
+SAVE_DIR += env_name
+
+model_save_dir = file_path + SAVE_DIR
+save_file = model_save_dir.split('/')[-1]
+
+try:
+    os.makedirs(model_save_dir)
+except FileExistsError:
+    import shutil
+    shutil.rmtree(model_save_dir)
+    os.makedirs(model_save_dir)
+
+hidden_dim = 256
+episodes = 310
+max_step = 300
+
+writer_path = model_save_dir + LOG_DIR
+writer = SummaryWriter(writer_path)
+
 model = namedtuple('model', ['policy_net', 'value_net', 'v_net'])
-actor = ActorGaussian(state_space, hidden_dim, action_space)
-critic = CriticQTwin(state_space, hidden_dim, action_space)
-v_net = ValueNet(state_space)
-model = model(actor, critic, v_net)
-# buffer = Buffer(buffer_size)
-policy = SAC(model, action_space=env.action_space, buffer_size=buffer_size,
-              actor_learn_freq=actor_learn_freq, target_update_freq=target_update_freq, batch_size=batch_size)
 
-def sample(env, policy, max_step, test=False):
-    assert env, 'You must set env for sample'
-    reward_avg = 0
+
+TRAIN = True
+PLOT = True
+WRITER = False
+
+def sample(env, policy, max_step):
+    # rewards = 0
+    rewards = []
     state = env.reset()
-
     for step in range(max_step):
-        action = policy.choose_action(state, test)
-        # assert  0
+        #==============choose_action==============
+        action = policy.choose_action(state)
         next_state, reward, done, info = env.step(action)
-        if test:
-            env.render()
-        # process env callback
-        if not test:
+        if TRAIN:
             mask = 0 if done else 1
+            #==============process==============
             policy.process(s=state, a=action, r=reward, m=mask, s_=next_state)
-
-        reward_avg += reward
+        else:
+            env.render()
+        rewards.append(reward)
+        # rewards += reward
         if done:
             break
         state = next_state
 
-    if not test:
-        pg_loss, v_loss, q_loss = policy.learn()
-        return reward_avg/(step+1), step, pg_loss, v_loss, q_loss
-    return reward_avg/(step+1), step, 0, 0, 0
+    # reward_mean /= (step + 1)
+    return rewards
 
-
-run_type = ['train', 'eval']
-run = run_type[0]
-plot_name = 'SAC_TwoNet_Double'
-
-writer = SummaryWriter('./logs/sac')
 def main():
-    test = False
-    if run == 'eval':
-        global episodes
-        episodes = 100
-        test = True
-        print('Loading model...')
+    mean, std = [], []
+    if not TRAIN:
         policy.load_model(model_save_dir, save_file, load_actor=True)
-
-    elif run == 'train':
-        print('Saving model setting...')
-        policy_test.save_setting(env_name, state_space, action_space, episodes,
-                                 max_step, policy, model_save_dir, save_file)
-    else:
-        print('Setting your run type!')
-        return 0
-
     live_time = []
+    
     for i_eps in range(episodes):
-        rewards, step, pg_loss, v_loss, q_loss = sample(env, policy, max_step, test=test)
-        if run == 'eval':
-            print(f'Eval eps:{i_eps+1}, Rewards:{rewards}, Steps:{step+1}')
-            continue
-        live_time.append(rewards)
-        policy_test.plot(live_time, plot_name, model_save_dir)
+        rewards = sample(env, policy, max_step)
+        reward_mean = np.mean(rewards)
+        reward_std = np.std(rewards)
 
-        writer.add_scalar('reward', rewards, global_step=i_eps)
-        writer.add_scalar('loss/pg', pg_loss, global_step=i_eps)
-        writer.add_scalar('loss/v', v_loss, global_step=i_eps)
-        writer.add_scalar('loss/q', q_loss, global_step=i_eps)
+        mean.append(reward_mean)
+        std.append(reward_std)
+        if not TRAIN:
+            print (f'EPS:{i_eps + 1}, reward:{round(reward_mean, 3)}')
+        else:
+            if policy.warm_up():
+                print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
+                continue
+            #==============learn==============
+            pg_loss, q_loss, a_loss = policy.learn()
+            if PLOT:
+                live_time.append(reward_mean)
+                plot(live_time, POLT_NAME, model_save_dir, 100)
+            if WRITER:
+                writer.add_scalar('reward', reward_mean, global_step=i_eps)
+                writer.add_scalar('loss/pg_loss', pg_loss, global_step=i_eps)
+                writer.add_scalar('loss/q_loss', q_loss, global_step=i_eps)
+                writer.add_scalar('loss/alpha_loss', a_loss, global_step=i_eps)
 
-        if i_eps > 0 and i_eps % 100 == 0:
-            print(f'i_eps is {i_eps}')
-            policy.save_model(model_save_dir, save_file, save_actor=True, save_critic=True)
-    env.close()
-
+            if i_eps % 5 == 0:
+                print (f'EPS:{i_eps}, reward_mean:{round(reward_mean, 3)}, pg_loss:{round(pg_loss, 3)}, q_loss:{round(q_loss, 3)}, alpha_loss:{round(a_loss, 3)}')
+            if i_eps % 200 == 0:
+                policy.save_model(model_save_dir, save_file, save_actor=True, save_critic=True)
+    writer.close()
+    env.close
+    return mean, std
 
 if __name__ == '__main__':
-    main()
+    means, stds = [], []
+
+    for seed in range(5):
+        torch.manual_seed(seed * 10)
+        actor = ActorModel(state_space, hidden_dim, action_space)
+        critic = CriticModel(state_space, hidden_dim, action_space)
+        v_net = ValueModel(state_space)
+        rl_agent = model(actor, critic, v_net)
+        policy = SAC(rl_agent, buffer_size=5000, actor_learn_freq=1, update_iteration=10,
+                target_update_freq=10, batch_size=100, use_priority=use_priority)
+
+        mean, std = main()
+        means.append(mean)
+        stds.append(std)
+
+    d = {'mean': means, 'std': stds}
+    pkl_dir = file_path + '/sac_per.pkl'
+    print (pkl_dir)
+    import pickle
+    with open(pkl_dir, 'wb') as f:
+        pickle.dump(d, f, pickle.HIGHEST_PROTOCOL)

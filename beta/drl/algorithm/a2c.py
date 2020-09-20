@@ -59,7 +59,8 @@ class A2C(BasePolicy): #option: double
         S = torch.tensor(memory_split['s'], dtype=torch.float32, device=self.device)
         R = torch.tensor(memory_split['r'], dtype=torch.float32).view(-1, 1)
         M = torch.tensor(memory_split['m'], dtype=torch.float32).view(-1, 1)
-        Log = torch.stack(list(memory_split['l'])).view(-1, 1)
+        # Log = torch.stack(list(memory_split['l'])).view(-1, 1)
+        Log = torch.stack(memory_split['l']).view(-1, 1)
 
         v_eval = self.critic_eval(S)
 

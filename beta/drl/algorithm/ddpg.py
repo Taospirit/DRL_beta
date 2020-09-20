@@ -48,21 +48,11 @@ class DDPG(BasePolicy):
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
 
-        # self.actor_eval.train()
-        # self.critic_eval.train()
-
         if self._target:
             self.actor_target = self.copy_net(self.actor_eval)
             self.critic_target = self.copy_net(self.critic_eval)
 
         self.criterion = nn.MSELoss()  # why mse?
-        # self.action_max = action_max
-
-    # def choose_action(self, state, test=False):
-    #     state = torch.tensor(state, dtype=torch.float32, device=self.device)
-    #     if test:
-    #         self.actor_eval.eval()
-    #     return self.actor_eval.action(state)
 
     def learn(self):
         loss_actor_avg, loss_critic_avg = 0, 0

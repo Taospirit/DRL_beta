@@ -1,7 +1,10 @@
 import numpy as np
 import random
+import torch
 from collections import namedtuple
 
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class ReplayBuffer(object):
     def __init__(self, size, replay=True):
         self._maxsize = size
@@ -37,12 +40,11 @@ class ReplayBuffer(object):
     def split(self, batchs):
         split_res = {}
         for key in batchs[-1].keys():
-            # values = [item[key] for item in batchs]
-            values = np.array([item[key] for item in batchs])
-            # print (type(values))
-            split_res[key] = values
-            # print (split_res[key].shape)
-            # for item in batchs:
+            # values = np.array([item[key] for item in batchs])
+            # split_res[key] = values
+            split_res[key] = [item[key] for item in batchs]
+        # split_res['s_'] = split_res['s'][1:]
+        # split_res['s_'].append(self.)
         return split_res
 
     def split_batch(self, batch_size):
@@ -66,43 +68,58 @@ class SegmentTree():
     def __init__(self, size):
         self.index = 0
         self.size = size
+        self.full = False
         self.sum_tree = np.zeros((2 * size - 1, ), dtype=np.float32)
         self.data = np.array([None] * size)
         self.max = 1
+        self.cnt = 0
 
-    def _propagate(self, index):
-        p = (index - 1) // 2
-        l, r = 2 * p + 1, 2 * p + 2
-        self.sum_tree[p] = self.sum_tree[l] + self.sum_tree[r]
-        if p != 0:
-            self._propagate(p)
-
-    def _retrieve(self, index, value):
-        l, r = 2 * index + 1, 2 * index + 2
-        if l >= len(self.sum_tree):
-            return index
-        elif value <= self.sum_tree[l]:
-            return self._retrieve(l, value)
-        else:
-            return self._retrieve(r, value - self.sum_tree[l])
+    def _propagate(self, index, value):
+        parent = (index - 1) // 2
+        left, right = 2 * parent + 1, 2 * parent + 2
+        self.sum_tree[parent] = self.sum_tree[left] + self.sum_tree[right]
+        if parent != 0:
+            self._propagate(parent, value)
 
     def update(self, index, value):
         self.sum_tree[index] = value
-        self._propagate(index)
+        self._propagate(index, value)
         self.max = max(value, self.max)
 
     def append(self, data, value):
-        self.data[self.index] = data # sefl.data store data
-        self.update(self.index + self.size - 1, value)  # Update tree
+        self.data[self.index] = data
+        self.update(self.index + self.size - 1, value)
         self.index = (self.index + 1) % self.size
         self.full = self.full or self.index == 0
         self.max = max(value, self.max)
 
+    def _retrieve(self, index, value):
+        left, right = 2 * index + 1, 2 * index + 2
+        if left >= len(self.sum_tree):
+            # if self.cnt > 15:
+            #     print (f'GET! at {index} for cnt {self.cnt}')
+            self.cnt = 0
+            return index
+        elif value <= self.sum_tree[left]:
+            self.cnt += 1
+            # if self.cnt > 15:
+            #     print (f'search left {left}, size {self.size}')
+            # print (f'retrieveing at left {self.cnt}')
+            # print (f'left_index {left} to search')
+            return self._retrieve(left, value)
+        else:
+            self.cnt += 1
+            # if self.cnt > 15:
+            #     print (f'search right {right}, size {self.size}')
+            # print (f'retrieveing at right {self.cnt}')
+            # print (f'right_index {right} to search')
+            return self._retrieve(right, value - self.sum_tree[left])
+
     def find(self, value):
-        index = self._retrieve(0, value)
-        data_index = index - self.size + 1
-        return self.sum_tree[index], data_index, index
-        # pi^a, data_index, sum_tree_index
+        tree_index = self._retrieve(0, value)
+        data_index = tree_index - self.size + 1
+        priority = self.sum_tree[tree_index]
+        return (priority, data_index, tree_index)
 
     def get(self, data_index):
         return self.data[data_index % self.size]
@@ -110,73 +127,117 @@ class SegmentTree():
     def total(self):
         return self.sum_tree[0]
 
-Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'mask'))
+Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'nonterminal'))
+# blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), None, 0, False) # atari game
+blank_trans = Transition(0, None, None, 0, False) # gym
 class PriorityReplayBuffer(object):
-    def __init__(self, size, replay=True):
+    def __init__(self, capacity):
         super().__init__()
-        self.capacity = size
-        self.history = 4
+        self.capacity = capacity
+        self.history = 1
         self.discount = 0.99
         self.n = 3
         self.priority_weight = 0.4
         self.priority_exponent = 0.5
         self.t = 0
-        self.SumTree = SegmentTree(capacity)
+        self.StoreTree = SegmentTree(capacity)
+        self.blank_trans = Transition(0, None, None, 0, False)
 
-    def append(self, state, action, reward, mask):
-        self.SumTree.append(Transition(self.t, state, action, reward, mask), self.SumTree.max)
-        self.t = 0 if mask self.t + 1
-       
+    def append(self, **kwargs):
+        state, action, reward, terminal = kwargs['s'], kwargs['a'], kwargs['r'], not kwargs['m']
+        if self.blank_trans.state is None:
+            blank_state = np.zeros(np.array(state).shape, dtype=np.float32)
+            self.blank_trans = Transition(0, blank_state, None, 0, False)
+        self.StoreTree.append(Transition(self.t, state, action, reward, not terminal), self.StoreTree.max)
+        self.t = 0 if terminal else self.t + 1
+
     def _get_transition(self, idx): # n-step transition
         transition = np.array([None] * (self.history + self.n))
-        transition[self.history - 1] = self.SumTree.get(idx)
-        for t in range(self.history - 2, -1, -1):
-            if transition[t + 1].timestep == 0:
-                transition[t] = blank_trans
+        transition[self.history - 1] = self.StoreTree.get(idx)
+        for i in range(self.history - 2, -1, -1):
+            if transition[i + 1].timestep == 0:
+                transition[i] = blank_trans
             else:
-                transition[t] = self.SumTree.get(idx - self.history + 1 + t)
-        for t in range(self.history, self.history + self.n):  # e.g. 4 5 6
-            if transition[t - 1].mask:
-                transition[t] = self.SumTree.get(idx - self.history + 1 + t)
+                transition[i] = self.StoreTree.get(idx - self.history + 1 + i)
+        for i in range(self.history, self.history + self.n):  # e.g. 4 5 6
+            if transition[i - 1].nonterminal:
+                # print ('----before-----')
+                # assert 0
+                transition[i] = self.StoreTree.get(idx - self.history + 1 + i)
             else:
-                transition[t] = blank_trans
+                transition[i] = blank_trans
+        # print (f'transition {transition}')
         return transition
 
     def _get_sample_from_segment(self, segment, i):
         valid = False
-        # to be check
+        cnt = 0
         while not valid:
+            cnt += 1
+            # print (f'retry......{cnt}')
             sample = np.random.uniform(i * segment, (i + 1) * segment)
-            prob, idx, tree_idx = self.SumTree.find(sample)
-            if (self.SumTree.index - idx) % self.capacity > self.n and (idx - self.SumTree.index) % self.capacity >= self.history and prob != 0:
+            if cnt > 50:
+                sample = np.random.uniform((i - 1) * segment, (i + 2) * segment)
+
+            prio, idx, tree_idx = self.StoreTree.find(sample)
+
+            forward = (self.StoreTree.index - idx) % self.capacity
+            backward = (idx - self.StoreTree.index) % self.capacity
+
+            if forward > self.n and backward >= self.history and prio != 0:
                 valid = True
+            # if cnt > 10:
+            #     print ('===================')
+            #     print (f'sample from {i * segment}, {(i + 1) * segment}, get {sample}')
+            #     print (f'forward {forward}, n {self.n}; backward {backward}, history {self.history}')
+            #     print (f'valie {valid}, idx {idx}, index {self.StoreTree.index}, prio {prio}')
 
         transition = self._get_transition(idx)
+        # print(f'trans {transition}')
         state = [trans.state for trans in transition[:self.history]]
         next_state = [trans.state for trans in transition[self.n:self.n + self.history]]
         action = [transition[self.history - 1].action]
         discounted_reward = [sum(self.discount ** n * transition[self.history + n - 1].reward for n in range(self.n))]
-        mask = [transition[self.history + self.n - 1].mask]
+        nonterminal = [transition[self.history + self.n - 1].nonterminal]
 
-        return prob, idx, tree_idx, state, action, discounted_reward, next_state, mask
+        # state = torch.stack(state).to(device=device).to(dtype=torch.float32)
+        # next_state = torch.stack(next_state).to(device=device).to(dtype=torch.float32)
+        # action = torch.tensor(action, dtype=torch.int64, device=device)
+        # discounted_reward = torch.tensor(discounted_reward, dtype=torch.float32, device=device)
+        # nonterminal = torch.tensor(nonterminal, dtype=torch.int64, device=device)
+       
+        # print (f'state {state}, next_state {next_state}')
+
+        return prio, idx, tree_idx, state, action, discounted_reward, next_state, nonterminal
 
     def sample(self, batch_size):
-        p_total = self.SumTree.total()
+        p_total = self.StoreTree.total()
         segment = p_total / batch_size
         batch = [self._get_sample_from_segment(segment, i) for i in range(batch_size)]
-        probs, idxs, tree_idxs, states, actions, returns, next_states, masks = zip(*batch)
+        prios, idxs, tree_idxs, states, actions, returns, next_states, nonterminal = zip(*batch)
 
-        probs = np.array(probs, dtype=np.float32) / p_total
-        capacity = self.capacity if self.SumTree.full else self.SumTree.index
-        weights = (capacity * probs) ** -self.priority_weight
-        weights /= weights.max()
+        # states, next_states, = torch.stack(states), torch.stack(next_states)
+        # actions, returns, nonterminals = torch.cat(actions), torch.cat(returns), torch.stack(nonterminals)
+        states = np.squeeze(states, axis=1)
+        next_states = np.squeeze(next_states, axis=1)
 
-        return tree_idxs, states, actions, returns, next_states, masks, weights
+        prios = np.array(prios, dtype=np.float32) / p_total
+        capacity = self.capacity if self.StoreTree.full else self.StoreTree.index
+        weights = (capacity * prios) ** -self.priority_weight
+
+        # weights = torch.tensor(weights / weights.max(), dtype=torch.float32, device=device)
+
+        return tree_idxs, states, actions, returns, next_states, nonterminal, weights
 
     def update_priorities(self, idxs, priorities):
         priorities = np.power(priorities, self.priority_exponent)
-        [self.SumTree.update(idx, priority) for idx, priority in zip(idxs, priorities)]
+        [self.StoreTree.update(idx, priority) for idx, priority in zip(idxs, priorities)]
 
+    def is_full(self):
+        return self.StoreTree.full
+
+    def size(self):
+        return self.StoreTree.index
 
 class RunningStat(object):
     def __init__(self, shape):

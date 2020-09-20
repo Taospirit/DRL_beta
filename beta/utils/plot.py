@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 #                 plt.savefig(path)
 #             plt.pause(0.0000001)
 
-def plot(steps, y_label, model_save_dir):
+def plot(steps, y_label, model_save_dir, step_interval):
     ax = plt.subplot(111)
     ax.cla()
     ax.grid()
@@ -31,6 +31,6 @@ def plot(steps, y_label, model_save_dir):
     RunTime = len(steps)
 
     path = model_save_dir + '/RunTime' + str(RunTime) + '.jpg'
-    if len(steps) % 20 == 0:
+    if len(steps) % step_interval == 0:
         plt.savefig(path)
     plt.pause(0.0000001)
