@@ -76,9 +76,6 @@ class SAC_PER(BasePolicy):
             tensor_data = torch.tensor(data, dtype=torch.float32, device=self.device)
         return tensor_data
 
-    def warm_up(self):
-        return not self.buffer.is_full()
-
     def learn(self):
         pg_loss, q_loss, a_loss = 0, 0, 0
         for _ in range(self._update_iteration):
@@ -119,7 +116,6 @@ class SAC_PER(BasePolicy):
             critic_loss.backward()
             self.critic_eval_optim.step()
             self._learn_critic_cnt += 1
-
 
             actor_loss = torch.tensor(0)
             alpha_loss = torch.tensor(0)

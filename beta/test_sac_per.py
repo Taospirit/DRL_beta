@@ -1,7 +1,7 @@
 # from test_tool import policy_test
-from os.path import abspath, dirname
-import os
 import gym
+import os
+from os.path import abspath, dirname
 import time
 import matplotlib.pyplot as plt
 import torch
@@ -12,27 +12,41 @@ from torch.utils.tensorboard import SummaryWriter
 from collections import namedtuple
 import numpy as np
 # from drl.model import ActorModel, CriticQ
-# from drl.algorithm import SAC
-from drl.algorithm import SAC2 as SAC
+from drl.algorithm import SAC_PER as SAC
 from utils.plot import plot
 from utils.config import config
 
-# config
-config = config['sac']
+config = config['sac_per']
+
 env_name = config['env_name']
 buffer_size = config['buffer_size']
 actor_learn_freq = config['actor_learn_freq']
+update_iteration = config['update_iteration']
 target_update_freq = config['target_update_freq']
 batch_size = config['batch_size']
 hidden_dim = config['hidden_dim']
 episodes = config['episodes'] + 10
 max_step = config['max_step']
 
-POLT_NAME = config['POLT_NAME'] + env_name
-SAVE_DIR = config['SAVE_DIR'] + env_name
 LOG_DIR = config['LOG_DIR']
+SAVE_DIR = config['SAVE_DIR']
+POLT_NAME = config['POLT_NAME']
+PKL_NAME = '/sac_'
 
-model_save_dir = abspath(dirname(__file__)) + SAVE_DIR
+use_priority = False
+if use_priority:
+    p = 'per_'
+    SAVE_DIR += p
+    POLT_NAME += p
+    PKL_NAME += p
+
+POLT_NAME += env_name
+SAVE_DIR += env_name
+PKL_NAME += env_name
+
+file_path = abspath(dirname(__file__))
+pkl_dir = file_path + PKL_NAME
+model_save_dir = file_path + SAVE_DIR
 save_file = model_save_dir.split('/')[-1]
 writer_path = model_save_dir + LOG_DIR
 
@@ -45,8 +59,6 @@ except FileExistsError:
 
 env = gym.make(env_name)
 env = env.unwrapped
-env.seed(1)
-torch.manual_seed(1)
 
 # Parameters
 state_space = env.observation_space.shape[0]
@@ -80,6 +92,7 @@ class ActorModel(nn.Module):
         return mean, log_std
 
     def action(self, state, test=False):
+        # print (f'state {state}, size {state.size()}')
         mean, log_std = self.forward(state)
         if test:
             return mean.detach().cpu().numpy()
@@ -141,16 +154,6 @@ class ValueModel(nn.Module):
         x = self.linear3(x)
         return x
 
-
-model = namedtuple('model', ['policy_net', 'value_net', 'v_net'])
-actor = ActorModel(state_space, hidden_dim, action_space)
-critic = CriticModel(state_space, hidden_dim, action_space)
-v_net = ValueModel(state_space)
-model = model(actor, critic, v_net)
-policy = SAC(model, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq, 
-        target_update_freq=target_update_freq, batch_size=batch_size)
-writer = SummaryWriter(writer_path)
-
 TRAIN = True
 PLOT = True
 WRITER = False
@@ -170,24 +173,30 @@ def sample(env, policy, max_step):
         else:
             env.render()
         rewards.append(reward)
+        # rewards += reward
         if done:
             break
         state = next_state
 
     return rewards
 
-def main():
+def train():
+    mean, std = [], []
     if not TRAIN:
         policy.load_model(model_save_dir, save_file, load_actor=True)
     live_time = []
-
+    
     while policy.warm_up():
         sample(env, policy, max_step)
         print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
-    
+
     for i_eps in range(episodes):
         rewards = sample(env, policy, max_step)
         reward_mean = np.mean(rewards)
+        reward_std = np.std(rewards)
+
+        mean.append(reward_mean)
+        std.append(reward_std)
         if not TRAIN:
             print (f'EPS:{i_eps + 1}, reward:{round(reward_mean, 3)}')
         else:
@@ -208,6 +217,31 @@ def main():
                 policy.save_model(model_save_dir, save_file, save_actor=True, save_critic=True)
     writer.close()
     env.close
+    return mean, std
 
 if __name__ == '__main__':
-    main()
+    means, stds = [], []
+    model = namedtuple('model', ['policy_net', 'value_net', 'v_net'])
+
+    for seed in range(5):
+        env.seed(seed  * 10)
+        torch.manual_seed(seed * 10)
+
+        actor = ActorModel(state_space, hidden_dim, action_space)
+        critic = CriticModel(state_space, hidden_dim, action_space)
+        v_net = ValueModel(state_space)
+        rl_agent = model(actor, critic, v_net)
+        policy = SAC(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
+                update_iteration=update_iteration, target_update_freq=target_update_freq, 
+                batch_size=batch_size, use_priority=use_priority)
+        writer = SummaryWriter(writer_path)
+
+        mean, std = train()
+        means.append(mean)
+        stds.append(std)
+
+    d = {'mean': means, 'std': stds}
+    print (pkl_dir)
+    import pickle
+    with open(pkl_dir + '.pkl', 'wb') as f:
+        pickle.dump(d, f, pickle.HIGHEST_PROTOCOL)

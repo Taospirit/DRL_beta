@@ -7,18 +7,18 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Categorical, Normal
-from abc import ABC, abstractmethod
+# from abc import ABC, abstractmethod
 
-class BasePolicy(ABC):
+class BasePolicy(object):
     def __init__(self, **kwargs):
         super().__init__()
         self.buffer = None
     
-    @abstractmethod
+    # @abstractmethod
     def choose_action(self, state, **kwargs):
         raise NotImplementedError
 
-    @abstractmethod
+    # @abstractmethod
     def learn(self):
         raise NotImplementedError
 
@@ -35,6 +35,9 @@ class BasePolicy(ABC):
         if test:
             self.actor_eval.eval()
         return self.actor_eval.action(state)
+
+    def warm_up(self):
+        return not self.buffer.is_full()
 
     def save_model(self, save_dir, save_file_name, save_actor=False, save_critic=False):
         assert isinstance(save_dir, str) and isinstance(save_file_name, str)

@@ -1,6 +1,7 @@
 from test_tool import policy_test
 import gym
 import os
+from os.path import abspath, dirname
 import time
 import matplotlib.pyplot as plt
 import torch
@@ -13,8 +14,34 @@ from collections import namedtuple
 
 from drl.algorithm import DDPG
 from utils.plot import plot
-# env
-env_name = 'Pendulum-v0'
+from utils.config import config
+
+# config
+config = config['ddpg']
+env_name = config['env_name']
+buffer_size = config['buffer_size']
+actor_learn_freq = config['actor_learn_freq']
+target_update_freq = config['target_update_freq']
+batch_size = config['batch_size']
+hidden_dim = config['hidden_dim']
+episodes = config['episodes'] + 10
+max_step = config['max_step']
+
+POLT_NAME = config['POLT_NAME'] + env_name
+SAVE_DIR = config['SAVE_DIR'] + env_name
+LOG_DIR = config['LOG_DIR']
+
+model_save_dir = abspath(dirname(__file__)) + SAVE_DIR
+save_file = model_save_dir.split('/')[-1]
+writer_path = model_save_dir + LOG_DIR
+
+try:
+    os.makedirs(model_save_dir)
+except FileExistsError:
+    import shutil
+    shutil.rmtree(model_save_dir)
+    os.makedirs(model_save_dir)
+
 env = gym.make(env_name)
 env = env.unwrapped
 env.seed(1)
@@ -60,22 +87,14 @@ class CriticQ(nn.Module):
         return q_value
 
 
-hidden_dim = 32
-episodes = 5000
-max_step = 200
 
 model = namedtuple('model', ['policy_net', 'value_net'])
 actor = ActorDPG(state_space, hidden_dim, action_space)
 critic = CriticQ(state_space, hidden_dim, action_space)
 model = model(actor, critic)
-policy = DDPG(model, buffer_size=50000, actor_learn_freq=1, target_update_freq=10, batch_size=1000)
-
-model_save_dir = 'save/ddpg'
-model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
-save_file = model_save_dir.split('/')[-1]
-os.makedirs(model_save_dir, exist_ok=True)
-
-writer = SummaryWriter(os.path.dirname(model_save_dir)+'/logs/ddpg_1')
+policy = DDPG(model, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
+        target_update_freq=target_update_freq, batch_size=batch_size)
+writer = SummaryWriter(writer_path)
 
 TRAIN = True
 PLOT = True
@@ -105,6 +124,11 @@ def main():
     if not TRAIN:
         policy.load_model(model_save_dir, save_file, load_actor=True)
     live_time = []
+
+    while policy.warm_up():
+        sample(env, policy, max_step)
+        print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
+
     for i_eps in range(episodes):
         reward_avg = sample(env, policy, max_step)
         if not TRAIN:
@@ -114,7 +138,7 @@ def main():
             pg_loss, v_loss = policy.learn()
             if PLOT:
                 live_time.append(reward_avg)
-                plot(live_time, 'DDPG_'+env_name, model_save_dir)
+                plot(live_time, 'DDPG_'+env_name, model_save_dir, 100)
             if WRITER:
                 writer.add_scalar('reward', reward_avg, global_step=i_eps)
                 writer.add_scalar('loss/pg_loss', pg_loss, global_step=i_eps)
