@@ -15,7 +15,6 @@ def smooth(data, sm=1):
         for d in data:
             y = np.ones(sm)*1.0/sm
             d = np.convolve(y, d, "same")
-
             smooth_data.append(d)
 
     return smooth_data
@@ -31,7 +30,7 @@ if __name__ == '__main__':
         data2 = pickle.load(f)
 
     x1 = data["mean"]
-    # print (np.array(x1).shape)
+    print (np.array(x1).shape)
     x1 = smooth(x1, sm=5)
 
     x2 = data2['mean']

@@ -64,6 +64,9 @@ class ReplayBuffer(object):
     def all_memory(self):
         return self.memory
 
+    def size(self):
+        return self.append_index
+
 class SegmentTree():
     def __init__(self, size):
         self.index = 0
@@ -134,7 +137,6 @@ class PriorityReplayBuffer(object):
     def __init__(self, capacity):
         super().__init__()
         self.capacity = capacity
-        self.history = 1
         self.discount = 0.99
         self.n = 3
         self.priority_weight = 0.4
@@ -152,80 +154,51 @@ class PriorityReplayBuffer(object):
         self.t = 0 if terminal else self.t + 1
 
     def _get_transition(self, idx): # n-step transition
-        transition = np.array([None] * (self.history + self.n))
-        transition[self.history - 1] = self.StoreTree.get(idx)
-        for i in range(self.history - 2, -1, -1):
-            if transition[i + 1].timestep == 0:
-                transition[i] = blank_trans
-            else:
-                transition[i] = self.StoreTree.get(idx - self.history + 1 + i)
-        for i in range(self.history, self.history + self.n):  # e.g. 4 5 6
+        transition = np.array([None] * (self.n + 1))
+        transition[0] = self.StoreTree.get(idx)
+        for i in range(1, self.n + 1):
             if transition[i - 1].nonterminal:
-                # print ('----before-----')
-                # assert 0
-                transition[i] = self.StoreTree.get(idx - self.history + 1 + i)
+                transition[i] = self.StoreTree.get(idx + i)
             else:
                 transition[i] = blank_trans
-        # print (f'transition {transition}')
         return transition
 
-    def _get_sample_from_segment(self, segment, i):
-        valid = False
-        cnt = 0
-        while not valid:
-            cnt += 1
-            # print (f'retry......{cnt}')
-            sample = np.random.uniform(i * segment, (i + 1) * segment)
-            if cnt > 50:
-                sample = np.random.uniform((i - 1) * segment, (i + 2) * segment)
-
-            prio, idx, tree_idx = self.StoreTree.find(sample)
-
-            forward = (self.StoreTree.index - idx) % self.capacity
-            backward = (idx - self.StoreTree.index) % self.capacity
-
-            if forward > self.n and backward >= self.history and prio != 0:
-                valid = True
-            # if cnt > 10:
-            #     print ('===================')
-            #     print (f'sample from {i * segment}, {(i + 1) * segment}, get {sample}')
-            #     print (f'forward {forward}, n {self.n}; backward {backward}, history {self.history}')
-            #     print (f'valie {valid}, idx {idx}, index {self.StoreTree.index}, prio {prio}')
-
-        transition = self._get_transition(idx)
-        # print(f'trans {transition}')
-        state = [trans.state for trans in transition[:self.history]]
-        next_state = [trans.state for trans in transition[self.n:self.n + self.history]]
-        action = [transition[self.history - 1].action]
-        discounted_reward = [sum(self.discount ** n * transition[self.history + n - 1].reward for n in range(self.n))]
-        nonterminal = [transition[self.history + self.n - 1].nonterminal]
-
-        # state = torch.stack(state).to(device=device).to(dtype=torch.float32)
-        # next_state = torch.stack(next_state).to(device=device).to(dtype=torch.float32)
-        # action = torch.tensor(action, dtype=torch.int64, device=device)
-        # discounted_reward = torch.tensor(discounted_reward, dtype=torch.float32, device=device)
-        # nonterminal = torch.tensor(nonterminal, dtype=torch.int64, device=device)
-       
-        # print (f'state {state}, next_state {next_state}')
-
-        return prio, idx, tree_idx, state, action, discounted_reward, next_state, nonterminal
-
     def sample(self, batch_size):
+        def get_sample_from_segment(segment, i):
+            valid = False
+            cnt = 0
+            while not valid:
+                sample = np.random.uniform(i * segment, (i + 1) * segment)
+                
+                cnt += 1
+                if cnt > 30:
+                    sample = np.random.uniform(0, batch_size * segment)
+                prio, idx, tree_idx = self.StoreTree.find(sample)
+
+                forward = (self.StoreTree.index - idx) % self.capacity
+                if forward > self.n and prio != 0:
+                    valid = True
+        
+            transition = self._get_transition(idx)
+            state = [transition[0].state]
+            next_state = [transition[self.n].state]
+            action = [transition[0].action]
+            discounted_reward = [sum(self.discount ** i * transition[i].reward for i in range(self.n))]
+            nonterminal = [transition[self.n].nonterminal]
+
+            return prio, idx, tree_idx, state, action, discounted_reward, next_state, nonterminal
+
         p_total = self.StoreTree.total()
         segment = p_total / batch_size
-        batch = [self._get_sample_from_segment(segment, i) for i in range(batch_size)]
+        batch = [get_sample_from_segment(segment, i) for i in range(batch_size)]
         prios, idxs, tree_idxs, states, actions, returns, next_states, nonterminal = zip(*batch)
 
-        # states, next_states, = torch.stack(states), torch.stack(next_states)
-        # actions, returns, nonterminals = torch.cat(actions), torch.cat(returns), torch.stack(nonterminals)
         states = np.squeeze(states, axis=1)
         next_states = np.squeeze(next_states, axis=1)
 
         prios = np.array(prios, dtype=np.float32) / p_total
         capacity = self.capacity if self.StoreTree.full else self.StoreTree.index
         weights = (capacity * prios) ** -self.priority_weight
-
-        # weights = torch.tensor(weights / weights.max(), dtype=torch.float32, device=device)
 
         return tree_idxs, states, actions, returns, next_states, nonterminal, weights
 

@@ -12,15 +12,14 @@ from collections import namedtuple
 import numpy as np
 # from drl.model import ActorModel, CriticQ
 # from drl.algorithm import SAC
-from drl.algorithm import SAC2 as SAC
+from drl.algorithm import SAC_PER as SAC
 from utils.plot import plot
 
 env_list = ['Pendulum-v0', 'MountainCarContinuous-v0', 'Acrobot-v1', 'MountainCar-v0']
 env_name = env_list[0]
 env = gym.make(env_name)
 env = env.unwrapped
-env.seed(1)
-torch.manual_seed(1)
+
 
 # Parameters
 state_space = env.observation_space.shape[0]
@@ -120,11 +119,13 @@ file_path = os.path.abspath(os.path.dirname(__file__))
 SAVE_DIR = '/save/test_sac2_'
 LOG_DIR = '/runs'
 POLT_NAME = 'SAC_'
+PKL_NAME = '/sac.pkl'
 
-use_priority = True
+use_priority = False
 if use_priority:
     SAVE_DIR += 'per_'
     POLT_NAME += 'per_'
+    PKL_NAME = '/sac_per.pkl'
 
 POLT_NAME += env_name
 SAVE_DIR += env_name
@@ -140,14 +141,13 @@ except FileExistsError:
     os.makedirs(model_save_dir)
 
 hidden_dim = 256
-episodes = 310
+episodes = 500
 max_step = 300
 
 writer_path = model_save_dir + LOG_DIR
 writer = SummaryWriter(writer_path)
 
 model = namedtuple('model', ['policy_net', 'value_net', 'v_net'])
-
 
 TRAIN = True
 PLOT = True
@@ -173,16 +173,19 @@ def sample(env, policy, max_step):
             break
         state = next_state
 
-    # reward_mean /= (step + 1)
     return rewards
 
-def main():
+def train():
     mean, std = [], []
     if not TRAIN:
         policy.load_model(model_save_dir, save_file, load_actor=True)
     live_time = []
     
-    for i_eps in range(episodes):
+    while policy.warm_up():
+        sample(env, policy, max_step)
+        print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
+
+    for i_eps in range(episodes+10):
         rewards = sample(env, policy, max_step)
         reward_mean = np.mean(rewards)
         reward_std = np.std(rewards)
@@ -192,9 +195,10 @@ def main():
         if not TRAIN:
             print (f'EPS:{i_eps + 1}, reward:{round(reward_mean, 3)}')
         else:
-            if policy.warm_up():
-                print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
-                continue
+            # if policy.warm_up():
+            #     i_eps = 0
+            #     print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
+            #     continue
             #==============learn==============
             pg_loss, q_loss, a_loss = policy.learn()
             if PLOT:
@@ -218,20 +222,22 @@ if __name__ == '__main__':
     means, stds = [], []
 
     for seed in range(5):
+        env.seed(seed  * 10)
         torch.manual_seed(seed * 10)
+
         actor = ActorModel(state_space, hidden_dim, action_space)
         critic = CriticModel(state_space, hidden_dim, action_space)
         v_net = ValueModel(state_space)
         rl_agent = model(actor, critic, v_net)
-        policy = SAC(rl_agent, buffer_size=5000, actor_learn_freq=1, update_iteration=10,
-                target_update_freq=10, batch_size=100, use_priority=use_priority)
+        policy = SAC(rl_agent, buffer_size=50000, actor_learn_freq=5, update_iteration=10,
+                target_update_freq=20, batch_size=128, use_priority=use_priority)
 
-        mean, std = main()
+        mean, std = train()
         means.append(mean)
         stds.append(std)
 
     d = {'mean': means, 'std': stds}
-    pkl_dir = file_path + '/sac_per.pkl'
+    pkl_dir = file_path + PKL_NAME
     print (pkl_dir)
     import pickle
     with open(pkl_dir, 'wb') as f:

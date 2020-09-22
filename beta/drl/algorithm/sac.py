@@ -59,11 +59,6 @@ class SAC(BasePolicy):
         self.value_eval_optim = optim.Adam(self.value_eval.parameters(), lr=self.lr)
 
         self.criterion = nn.SmoothL1Loss()
-    
-    # def choose_action(self, state, test=False):
-    #     state = torch.tensor(state, dtype=torch.float32, device=self.device)
-    #     action = self.actor_eval.action(state)
-    #     return action
 
     def learn(self):
         pg_loss, v_loss, q_loss = 0, 0, 0
