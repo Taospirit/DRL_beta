@@ -88,8 +88,8 @@ def main():
 
         # step3: policy learn from stored transition in Buffer, to update network
         pg_loss, v_loss = policy.learn()
-
-        print (f'EPS:{i_eps}, reward:{round(rewards, 3)}, pg_loss:{round(pg_loss, 3)}, v_loss:{round(v_loss, 3)}')    
+        reward, pg_loss, v_loss = round(rewards, 3), round(pg_loss, 3), round(v_loss, 3)
+        print (f'EPS:{i_eps}, reward:{rewards}, pg_loss:{pg_loss}, v_loss:{v_loss}')    
     env.close()
 
 if __name__ == '__main__':
