@@ -12,7 +12,7 @@ from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 from drl.utils import PriorityReplayBuffer
 
-class SAC2(BasePolicy):
+class SAC_PER(BasePolicy):
     def __init__(
         self, 
         model,
@@ -56,10 +56,6 @@ class SAC2(BasePolicy):
         self.actor_eval = model.policy_net.to(self.device).train()
         self.critic_eval = model.value_net.to(self.device).train()
 
-        # self.actor_eval = actor_net.to(self.device).train()
-        # self.critic_eval = critic_net.to(self.device).train()
-        # self.value_eval = v_net.to(self.device).train()
-
         self.actor_target = self.copy_net(self.actor_eval)
         self.critic_target = self.copy_net(self.critic_eval)
         
@@ -80,15 +76,24 @@ class SAC2(BasePolicy):
             tensor_data = torch.tensor(data, dtype=torch.float32, device=self.device)
         return tensor_data
 
+    def warm_up(self):
+        return not self.buffer.is_full()
+
     def learn(self):
         pg_loss, q_loss, a_loss = 0, 0, 0
         for _ in range(self._update_iteration):
-            batch_split = self.buffer.split_batch(self._batch_size)
-            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device)
-            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).view(-1, 1)
-            M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
-            R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
-            S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=self.device)
+            if self.use_priority:
+                tree_idxs, S, A, R, S_, M, weights = self.buffer.sample(self._batch_size)
+                W = torch.tensor(weights, dtype=torch.float32, device=self.device).view(-1, 1)
+            else:
+                batch_split = self.buffer.split_batch(self._batch_size)
+                S, A, M, R, S_ = batch_split['s'], batch_split['a'], batch_split['m'], batch_split['r'],  batch_split['s_']
+            # print ('after sampling from buffer!')
+            R = torch.tensor(R, dtype=torch.float32).view(-1, 1)
+            S = torch.tensor(S, dtype=torch.float32, device=self.device)
+            A = torch.tensor(A, dtype=torch.float32, device=self.device).view(-1, 1)
+            M = torch.tensor(M, dtype=torch.float32).view(-1, 1)
+            S_ = torch.tensor(S_, dtype=torch.float32, device=self.device)
 
             # print (f'size S:{S.size()}, A:{A.size()}, M:{M.size()}, R:{R.size()}, S_:{S_.size()}, W:{W.size()}')
             with torch.no_grad():
@@ -100,7 +105,15 @@ class SAC2(BasePolicy):
             
             # q_loss
             q1_eval, q2_eval = self.critic_eval(S, A)
-            critic_loss = self.criterion(q1_eval, q_target) + self.criterion(q2_eval, q_target)
+            
+            if self.use_priority:
+                loss1 = torch.stack([self.criterion(q, q_)*w for q, q_, w in zip(q1_eval, q_target, W)])
+                loss2 = torch.stack([self.criterion(q, q_)*w for q, q_, w in zip(q2_eval, q_target, W)])
+                batch_loss = loss1 + loss2
+                self.buffer.update_priorities(tree_idxs, abs(0.5 * batch_loss.detach().cpu().numpy()))
+                critic_loss = batch_loss.mean()
+            else:
+                critic_loss = self.criterion(q1_eval, q_target) + self.criterion(q2_eval, q_target)
 
             self.critic_eval_optim.zero_grad()
             critic_loss.backward()
