@@ -39,7 +39,7 @@ if __name__ == '__main__':
 
     time = range(np.array(x1).shape[-1])
 
-    sns.set(style="darkgrid", font_scale=1.5)
+    sns.set(style="darkgrid", font_scale=1)
     sns.tsplot(time=time, data=x1, color="b", condition="SAC", linestyle='-')
     sns.tsplot(time=time, data=x2, color="r", condition="SAC_pre", linestyle='-')
 
