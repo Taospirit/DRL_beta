@@ -109,7 +109,6 @@ class SAC_PER(BasePolicy):
             if self.use_priority:
                 critic_loss = (W * batch_loss).mean()
                 self.buffer.update_priorities(tree_idxs, abs(batch_loss.detach().cpu().numpy()))
-
             else:
                 critic_loss = batch_loss.mean()
 
