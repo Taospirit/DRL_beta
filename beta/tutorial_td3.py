@@ -10,13 +10,14 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributions import Categorical
 from collections import namedtuple
+from copy import deepcopy
 
-from drl.algorithm import DDPG
+from drl.algorithm import TD3
 from utils.plot import plot
 from utils.config import config
 
 # config
-config = config['ddpg']
+config = config['td3']
 env_name = config['env_name']
 buffer_size = config['buffer_size']
 actor_learn_freq = config['actor_learn_freq']
@@ -65,7 +66,7 @@ class ActorModel(nn.Module):
         action = self.net(state)
         return action
 
-    def action(self, state, noise_std=0, noise_clip=0.5):
+    def action(self, state, noise_std=0.2, noise_clip=0.5):
         action = self.net(state)
         if noise_std:
             noise_norm = torch.ones_like(action).data.normal_(0, noise_std).to(self.device)
@@ -76,21 +77,27 @@ class ActorModel(nn.Module):
 class CriticModel(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
-        # inpur_dim = state_dim + action_dim, 
         self.net = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
                                  nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
                                  nn.Linear(hidden_dim, 1), )
-
+        self.net_copy = deepcopy(self.net)
+        
     def forward(self, state, action):
         x = torch.cat((state, action), dim=1)
         q_value = self.net(x)
         return q_value
 
+    def twinQ(self, state, action):
+        x = torch.cat((state, action), dim=1)
+        q1_value = self.net(x)
+        q2_value = self.net_copy(x)
+        return q1_value, q2_value
+
 model = namedtuple('model', ['policy_net', 'value_net'])
 actor = ActorModel(state_space, hidden_dim, action_space)
 critic = CriticModel(state_space, hidden_dim, action_space)
 model = model(actor, critic)
-policy = DDPG(model, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
+policy = TD3(model, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq, 
         target_update_freq=target_update_freq, batch_size=batch_size)
 writer = SummaryWriter(writer_path)
 
