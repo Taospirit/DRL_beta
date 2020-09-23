@@ -19,7 +19,7 @@ class DDPG(BasePolicy):
         actor_learn_freq=1,
         target_update_freq=0,
         target_update_tau=1,
-        learning_rate=0.01,
+        learning_rate=3e-3,
         discount_factor=0.99,
         batch_size=100,
         verbose=False,
@@ -35,7 +35,6 @@ class DDPG(BasePolicy):
         self._target = target_update_freq > 0
         self._update_iteration = 10
         self._sync_cnt = 0
-        # self._learn_cnt = 0
         self._learn_critic_cnt = 0
         self._learn_actor_cnt = 0
         self._verbose = verbose

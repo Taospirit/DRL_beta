@@ -40,7 +40,6 @@ class SAC2(BasePolicy):
         self._target = target_update_freq > 0
         self._update_iteration = update_iteration
         self._sync_cnt = 0
-        # self._learn_cnt = 0
         self._learn_critic_cnt = 0
         self._learn_actor_cnt = 0
         self._verbose = verbose
@@ -55,10 +54,6 @@ class SAC2(BasePolicy):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.actor_eval = model.policy_net.to(self.device).train()
         self.critic_eval = model.value_net.to(self.device).train()
-
-        # self.actor_eval = actor_net.to(self.device).train()
-        # self.critic_eval = critic_net.to(self.device).train()
-        # self.value_eval = v_net.to(self.device).train()
 
         self.actor_target = self.copy_net(self.actor_eval)
         self.critic_target = self.copy_net(self.critic_eval)
@@ -106,7 +101,6 @@ class SAC2(BasePolicy):
             critic_loss.backward()
             self.critic_eval_optim.step()
             self._learn_critic_cnt += 1
-
 
             actor_loss = torch.tensor(0)
             alpha_loss = torch.tensor(0)
