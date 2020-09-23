@@ -62,7 +62,7 @@ class SAC_PER(BasePolicy):
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
 
-        self.criterion = nn.SmoothL1Loss()
+        self.criterion = nn.SmoothL1Loss(reduction='none') # keep batch dim
 
         self.target_entropy = -torch.tensor(1).to(self.device)
         self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
@@ -102,15 +102,16 @@ class SAC_PER(BasePolicy):
             
             # q_loss
             q1_eval, q2_eval = self.critic_eval(S, A)
-            
+            loss1 = self.criterion(q1_eval, q_target)
+            loss2 = self.criterion(q2_eval, q_target)
+            batch_loss = 0.5 * (loss1 + loss2)
+
             if self.use_priority:
-                loss1 = torch.stack([self.criterion(q, q_)*w for q, q_, w in zip(q1_eval, q_target, W)])
-                loss2 = torch.stack([self.criterion(q, q_)*w for q, q_, w in zip(q2_eval, q_target, W)])
-                batch_loss = loss1 + loss2
-                self.buffer.update_priorities(tree_idxs, abs(0.5 * batch_loss.detach().cpu().numpy()))
-                critic_loss = batch_loss.mean()
+                critic_loss = (W * batch_loss).mean()
+                self.buffer.update_priorities(tree_idxs, abs(batch_loss.detach().cpu().numpy()))
+
             else:
-                critic_loss = self.criterion(q1_eval, q_target) + self.criterion(q2_eval, q_target)
+                critic_loss = batch_loss.mean()
 
             self.critic_eval_optim.zero_grad()
             critic_loss.backward()
@@ -137,7 +138,7 @@ class SAC_PER(BasePolicy):
                 self.alpha_optim.step()
                 self.alpha = float(self.log_alpha.exp().detach().cpu().numpy())
 
-            q_loss += critic_loss.item() * 0.5
+            q_loss += critic_loss.item()
             pg_loss += actor_loss.item()
             a_loss += alpha_loss.item()
 
