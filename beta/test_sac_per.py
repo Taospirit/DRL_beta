@@ -31,21 +31,21 @@ max_step = config['max_step']
 LOG_DIR = config['LOG_DIR']
 SAVE_DIR = config['SAVE_DIR']
 POLT_NAME = config['POLT_NAME']
-PKL_NAME = '/sac_'
+PKL_DIR = config['PKL_DIR']
 
-use_priority = False
+use_priority = True
 if use_priority:
     p = 'per_'
     SAVE_DIR += p
     POLT_NAME += p
-    PKL_NAME += p
+    PKL_DIR += p
 
 POLT_NAME += env_name
 SAVE_DIR += env_name
-PKL_NAME += env_name
+PKL_DIR += env_name
 
 file_path = abspath(dirname(__file__))
-pkl_dir = file_path + PKL_NAME
+pkl_dir = file_path + PKL_DIR
 model_save_dir = file_path + SAVE_DIR
 save_file = model_save_dir.split('/')[-1]
 writer_path = model_save_dir + LOG_DIR
@@ -127,7 +127,6 @@ class CriticModel(nn.Module):
         self.net2 = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
                                  nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
                                  nn.Linear(hidden_dim, 1), )
-        # self.net = build_critic_network(state_dim, hidden_dim, action_dim)
 
     def forward(self, state, action):
         input = torch.cat((state, action), dim=1)
@@ -159,7 +158,6 @@ PLOT = True
 WRITER = False
 
 def sample(env, policy, max_step):
-    # rewards = 0
     rewards = []
     state = env.reset()
     for step in range(max_step):
@@ -186,9 +184,9 @@ def train():
         policy.load_model(model_save_dir, save_file, load_actor=True)
     live_time = []
     
-    while policy.warm_up():
-        sample(env, policy, max_step)
-        print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
+    # while policy.warm_up():
+    #     sample(env, policy, max_step)
+    #     print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
 
     for i_eps in range(episodes):
         rewards = sample(env, policy, max_step)
@@ -222,26 +220,33 @@ def train():
 if __name__ == '__main__':
     means, stds = [], []
     model = namedtuple('model', ['policy_net', 'value_net', 'v_net'])
+    for i in range(5):
+        learn_freq = 2*i +1
 
-    for seed in range(5):
-        env.seed(seed  * 10)
-        torch.manual_seed(seed * 10)
+        for seed in range(5):
+            # env.seed(seed  * 10)
+            # torch.manual_seed(seed * 10)
+            env.seed(1)
+            torch.manual_seed(1)
 
-        actor = ActorModel(state_space, hidden_dim, action_space)
-        critic = CriticModel(state_space, hidden_dim, action_space)
-        v_net = ValueModel(state_space)
-        rl_agent = model(actor, critic, v_net)
-        policy = SAC(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
-                update_iteration=update_iteration, target_update_freq=target_update_freq, 
-                batch_size=batch_size, use_priority=use_priority)
-        writer = SummaryWriter(writer_path)
+            actor = ActorModel(state_space, hidden_dim, action_space)
+            critic = CriticModel(state_space, hidden_dim, action_space)
+            v_net = ValueModel(state_space)
+            rl_agent = model(actor, critic, v_net)
+            policy = SAC(rl_agent, buffer_size=buffer_size, actor_learn_freq=learn_freq,
+                    update_iteration=update_iteration, target_update_freq=target_update_freq, 
+                    batch_size=batch_size, use_priority=use_priority)
+            writer = SummaryWriter(writer_path)
 
-        mean, std = train()
-        means.append(mean)
-        stds.append(std)
+            mean, std = train()
+            means.append(mean)
+            stds.append(std)
 
-    d = {'mean': means, 'std': stds}
-    print (pkl_dir)
-    import pickle
-    with open(pkl_dir + '.pkl', 'wb') as f:
-        pickle.dump(d, f, pickle.HIGHEST_PROTOCOL)
+        d = {'mean': means, 'std': stds}
+        import pickle
+        with open(pkl_dir + f'_learn_freq_{learn_freq}.pkl', 'wb') as f:
+            pickle.dump(d, f, pickle.HIGHEST_PROTOCOL)
+
+        print (f'finish learning at actor_learn_freq:{learn_freq}')
+
+    print ('finish all learning!')

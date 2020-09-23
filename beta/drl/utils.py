@@ -73,7 +73,7 @@ class SegmentTree():
         self.size = size
         self.full = False
         self.sum_tree = np.zeros((2 * size - 1, ), dtype=np.float32)
-        self.data = np.array([None] * size)
+        self.memory = []
         self.max = 1
         self.cnt = 0
 
@@ -90,7 +90,9 @@ class SegmentTree():
         self.max = max(value, self.max)
 
     def append(self, data, value):
-        self.data[self.index] = data
+        if len(self.memory) < self.size:
+            self.memory.append(None)
+        self.memory[self.index] = data
         self.update(self.index + self.size - 1, value)
         self.index = (self.index + 1) % self.size
         self.full = self.full or self.index == 0
@@ -125,7 +127,7 @@ class SegmentTree():
         return (priority, data_index, tree_index)
 
     def get(self, data_index):
-        return self.data[data_index % self.size]
+        return self.memory[data_index % self.size]
 
     def total(self):
         return self.sum_tree[0]
@@ -164,6 +166,7 @@ class PriorityReplayBuffer(object):
         return transition
 
     def sample(self, batch_size):
+        batch_size = min(batch_size, len(self.StoreTree.memory))
         def get_sample_from_segment(segment, i):
             valid = False
             cnt = 0
