@@ -52,17 +52,17 @@ if __name__ == '__main__':
     time = range(np.array(x1).shape[-1])
 
     sns.set(style="darkgrid", font_scale=1)
-    sns.tsplot(time=time, data=x1, color="blue", condition="SAC:actor_freq-1", linestyle='-')
-    sns.tsplot(time=time, data=x2, color="b", condition="SAC:actor_freq-3", linestyle='-')
-    sns.tsplot(time=time, data=x3, color="r", condition="SAC:actor_freq-5", linestyle='-')
-    sns.tsplot(time=time, data=x4, color="g", condition="SAC:actor_freq-7", linestyle='-')
-    sns.tsplot(time=time, data=x5, color="pink", condition="SAC:actor_freq-9", linestyle='-')
+    sns.tsplot(time=time, data=x1, color="blue", condition="actor_freq:1", linestyle='-')
+    sns.tsplot(time=time, data=x2, color="b", condition="actor_freq:3", linestyle='-')
+    sns.tsplot(time=time, data=x3, color="r", condition="actor_freq:5", linestyle='-')
+    sns.tsplot(time=time, data=x4, color="g", condition="actor_freq:7", linestyle='-')
+    sns.tsplot(time=time, data=x5, color="pink", condition="actor_freq:9", linestyle='-')
 
     plt.ylabel("Reward")
     plt.xlabel("Episodes Number")
-    plt.title("Pendulum-v0")
+    plt.title("SAC_Pendulum-v0")
 
-    save_name = '/actor_learn_freq_test.jpg'
+    save_name = '/actor_learn_freq.jpg'
     save_path = file_path + save_name
     # print (save_path)
     plt.savefig(save_path)

@@ -31,7 +31,7 @@ if __name__ == '__main__':
         data2 = pickle.load(f)
 
     x1 = data1["mean"]
-    # print (np.array(x1).shape)
+    print (np.array(x1).shape)
     x1 = smooth(x1, sm=3)
 
     x2 = data2['mean']
@@ -47,4 +47,5 @@ if __name__ == '__main__':
     plt.xlabel("Episodes Number")
     plt.title("Pendulum-v0")
 
+    plt.savefig(file_path +'/sac_per.jpg')
     plt.show()
