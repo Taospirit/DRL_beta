@@ -8,6 +8,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Categorical, Normal
 # from abc import ABC, abstractmethod
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class BasePolicy(object):
     def __init__(self, **kwargs):
@@ -31,7 +32,7 @@ class BasePolicy(object):
         return model_.eval()
 
     def choose_action(self, state, test=False):
-        state = torch.tensor(state, dtype=torch.float32, device=self.device)
+        state = torch.tensor(state, dtype=torch.float32, device=device)
         if test:
             self.actor_eval.eval()
         return self.actor_eval.action(state)

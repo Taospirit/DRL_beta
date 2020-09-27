@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from collections import namedtuple
 import numpy as np
 # from drl.model import ActorModel, CriticQ
-from drl.algorithm import SAC_PER as SAC
+from drl.algorithm import SACV as SAC
 from utils.plot import plot
 from utils.config import config
 
@@ -27,6 +27,7 @@ batch_size = config['batch_size']
 hidden_dim = config['hidden_dim']
 episodes = config['episodes'] + 10
 max_step = config['max_step']
+lr = config['lr']
 
 LOG_DIR = config['LOG_DIR']
 SAVE_DIR = config['SAVE_DIR']
@@ -129,13 +130,42 @@ class CriticModel(nn.Module):
                                  nn.Linear(hidden_dim, 1), )
 
     def forward(self, state, action):
-        input = torch.cat((state, action), dim=1)
-        q1_value = self.net1(input)
-        q2_value = self.net2(input)
+        x = torch.cat((state, action), dim=1)
+        q1_value = self.net1(x)
+        q2_value = self.net2(x)
         return q1_value, q2_value
 
+
+class CriticModelDist(nn.Module):
+    def __init__(self, obs_dim, mid_dim, act_dim, num_atoms):
+        self.net1 = nn.Sequential(nn.Linear(obs_dim + act_dim , mid_dim), nn.ReLU(),
+                                 nn.Linear(hid_dim, mid_dim), nn.ReLU(),
+                                 nn.Linear(mid_dim, num_atoms), )
+        self.net2 = nn.Sequential(nn.Linear(obs_dim + act_dim , mid_dim), nn.ReLU(),
+                                 nn.Linear(mid_dim, mid_dim), nn.ReLU(),
+                                 nn.Linear(mid_dim, num_atoms), )
+
+        # self.fc1 = nn.Linear(obs_dim + act_dim, mid_dim)
+        # self.fc2 = nn.Linear(mid_dim, mid_dim)
+        # self.fc3 = nn.Linear(mid_dim, num_atoms)
+        
+        # self.fc3.weight.data.uniform_(-init_w, init_w)
+        # self.fc3.bias.data.uniform_(-init_w, init_w)
+
+        self.z_atoms = np.linspace(v_min, v_max, num_atoms)
+
+    def forward(self, obs, act):
+        x = torch.cat((obs, act), dim=1)
+        q1 = self.net1(x)
+        q2 = self.net2(x)
+        return q1, q2
+
+    def get_probs(self, obs, act):
+        return torch.log_softmax(self.forward(obs, act), dim=1)
+
+
 class ValueModel(nn.Module):
-    def __init__(self, state_dim, edge=3e-3):
+    def __init__(self, state_dim, init_w=3e-3):
         super().__init__()
         self.linear1 = nn.Linear(state_dim, 256)
         self.linear2 = nn.Linear(256, 256)
@@ -144,8 +174,8 @@ class ValueModel(nn.Module):
         layer_norm(self.linear2, std=1.0)
         layer_norm(self.linear3, std=1.0)
 
-        # self.linear3.weight.data.uniform_(-edge, edge)
-        # self.linear3.bias.data.uniform_(-edge, edge)
+        self.linear3.weight.data.uniform_(-init_w, init_w)
+        self.linear3.bias.data.uniform_(-init_w, init_w)
         
     def forward(self, state):
         x = F.relu(self.linear1(state))
@@ -171,11 +201,9 @@ def sample(env, policy, max_step):
         else:
             env.render()
         rewards.append(reward)
-        # rewards += reward
         if done:
             break
         state = next_state
-
     return rewards
 
 def train():
@@ -183,7 +211,7 @@ def train():
     if not TRAIN:
         policy.load_model(model_save_dir, save_file, load_actor=True)
     live_time = []
-    
+
     # while policy.warm_up():
     #     sample(env, policy, max_step)
     #     print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
@@ -214,28 +242,31 @@ def train():
             if i_eps % 200 == 0:
                 policy.save_model(model_save_dir, save_file, save_actor=True, save_critic=True)
     writer.close()
-    env.close
+    env.close()
     return mean, std
 
 if __name__ == '__main__':
-    means, stds = [], []
+    # means, stds = [], []
     model = namedtuple('model', ['policy_net', 'value_net', 'v_net'])
-    for i in range(5):
-        learn_freq = 2*i +1
+    size_list = [128, 256, 512, 1024, 2048]
+    # for i in range(5):
+    #     batch_size = 
+    for size in size_list:
+        means, stds = [], []
 
         for seed in range(5):
-            # env.seed(seed  * 10)
-            # torch.manual_seed(seed * 10)
-            env.seed(1)
-            torch.manual_seed(1)
+            env.seed(seed  * 10)
+            torch.manual_seed(seed * 10)
+            # env.seed(1)
+            # torch.manual_seed(1)
 
             actor = ActorModel(state_space, hidden_dim, action_space)
             critic = CriticModel(state_space, hidden_dim, action_space)
             v_net = ValueModel(state_space)
             rl_agent = model(actor, critic, v_net)
-            policy = SAC(rl_agent, buffer_size=buffer_size, actor_learn_freq=learn_freq,
+            policy = SAC(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
                     update_iteration=update_iteration, target_update_freq=target_update_freq, 
-                    batch_size=batch_size, use_priority=use_priority)
+                    batch_size=size, use_priority=use_priority)
             writer = SummaryWriter(writer_path)
 
             mean, std = train()
@@ -244,9 +275,9 @@ if __name__ == '__main__':
 
         d = {'mean': means, 'std': stds}
         import pickle
-        with open(pkl_dir + f'_learn_freq_{learn_freq}.pkl', 'wb') as f:
+        with open(pkl_dir + f'_batch_size_{size}.pkl', 'wb') as f:
             pickle.dump(d, f, pickle.HIGHEST_PROTOCOL)
 
-        print (f'finish learning at actor_learn_freq:{learn_freq}')
+        # print (f'finish learning at actor_learn_freq:{learn_freq}')
 
     print ('finish all learning!')

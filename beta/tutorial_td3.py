@@ -81,7 +81,7 @@ class CriticModel(nn.Module):
                                  nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
                                  nn.Linear(hidden_dim, 1), )
         self.net_copy = deepcopy(self.net)
-        
+
     def forward(self, state, action):
         x = torch.cat((state, action), dim=1)
         q_value = self.net(x)

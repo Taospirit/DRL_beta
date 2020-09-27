@@ -25,6 +25,7 @@ batch_size = config['batch_size']
 hidden_dim = config['hidden_dim']
 episodes = config['episodes'] + 10
 max_step = config['max_step']
+lr = config['lr']
 
 POLT_NAME = config['POLT_NAME'] + env_name
 SAVE_DIR = config['SAVE_DIR'] + env_name
@@ -91,7 +92,7 @@ actor = ActorModel(state_space, hidden_dim, action_space)
 critic = CriticModel(state_space, hidden_dim, action_space)
 model = model(actor, critic)
 policy = DDPG(model, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
-        target_update_freq=target_update_freq, batch_size=batch_size)
+        target_update_freq=target_update_freq, batch_size=batch_size, learning_rate=lr)
 writer = SummaryWriter(writer_path)
 
 TRAIN = True
