@@ -137,14 +137,17 @@ class CriticModel(nn.Module):
 
 
 class CriticModelDist(nn.Module):
-    def __init__(self, obs_dim, mid_dim, act_dim, num_atoms):
+    def __init__(self, obs_dim, mid_dim, act_dim, v_min, v_max, num_atoms=51):
         self.net1 = nn.Sequential(nn.Linear(obs_dim + act_dim , mid_dim), nn.ReLU(),
-                                 nn.Linear(hid_dim, mid_dim), nn.ReLU(),
+                                 nn.Linear(mid_dim, mid_dim), nn.ReLU(),
                                  nn.Linear(mid_dim, num_atoms), )
         self.net2 = nn.Sequential(nn.Linear(obs_dim + act_dim , mid_dim), nn.ReLU(),
                                  nn.Linear(mid_dim, mid_dim), nn.ReLU(),
                                  nn.Linear(mid_dim, num_atoms), )
 
+        self.v_min = v_min
+        self.v_max = v_max
+        self.num_atoms = num_atoms
         # self.fc1 = nn.Linear(obs_dim + act_dim, mid_dim)
         # self.fc2 = nn.Linear(mid_dim, mid_dim)
         # self.fc3 = nn.Linear(mid_dim, num_atoms)
@@ -156,13 +159,15 @@ class CriticModelDist(nn.Module):
 
     def forward(self, obs, act):
         x = torch.cat((obs, act), dim=1)
-        q1 = self.net1(x)
-        q2 = self.net2(x)
-        return q1, q2
+        z1 = self.net1(x)
+        z2 = self.net2(x)
+        return z1, z2
 
     def get_probs(self, obs, act):
-        return torch.log_softmax(self.forward(obs, act), dim=1)
-
+        z1, z2 = self.forward(obs, act)
+        z1 = torch.log_softmax(z1, dim=1)
+        z2 = torch.log_softmax(z2, dim=1)
+        return z1, z2
 
 class ValueModel(nn.Module):
     def __init__(self, state_dim, init_w=3e-3):

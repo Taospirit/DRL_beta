@@ -8,11 +8,51 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Normal
 
-from drl.algorithm import *
+from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 from drl.utils import PriorityReplayBuffer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _l2_project(next_distr_v, rewards_v, dones_mask_t, gamma, n_atoms, v_min, v_max):
+    next_distr = next_distr_v.data.cpu().numpy()
+    rewards = rewards_v.data.cpu().numpy()
+    dones_mask = dones_mask_t.cpu().numpy().astype(np.bool)
+    batch_size = len(rewards)
+    proj_distr = np.zeros((batch_size, n_atoms), dtype=np.float32)
+    delta_z = (v_max - v_min) / (n_atoms - 1)
+
+    for atom in range(n_atoms):
+        tz_j = np.minimum(v_max, np.maximum(v_min, rewards + (v_min + atom * delta_z) * gamma))
+        b_j = (tz_j - v_min) / delta_z
+        l = np.floor(b_j).astype(np.int64)
+        u = np.ceil(b_j).astype(np.int64)
+        eq_mask = u == l
+        proj_distr[eq_mask, l[eq_mask]] += next_distr[eq_mask, atom]
+        ne_mask = u != l
+        proj_distr[ne_mask, l[ne_mask]] += next_distr[ne_mask, atom] * (u - b_j)[ne_mask]
+        proj_distr[ne_mask, u[ne_mask]] += next_distr[ne_mask, atom] * (b_j - l)[ne_mask]
+
+    if dones_mask.any():
+        proj_distr[dones_mask] = 0.0
+        tz_j = np.minimum(v_max, np.maximum(v_min, rewards[dones_mask]))
+        b_j = (tz_j - v_min) / delta_z
+        l = np.floor(b_j).astype(np.int64)
+        u = np.ceil(b_j).astype(np.int64)
+        eq_mask = u == l
+        eq_dones = dones_mask.copy()
+        eq_dones[dones_mask] = eq_mask
+        if eq_dones.any():
+            proj_distr[eq_dones, l[eq_mask]] = 1.0
+        ne_mask = u != l
+        ne_dones = dones_mask.copy()
+        ne_dones[dones_mask] = ne_mask
+        if ne_dones.any():
+            proj_distr[ne_dones, l[ne_mask]] = (u - b_j)[ne_mask]
+            proj_distr[ne_dones, u[ne_mask]] = (b_j - l)[ne_mask]
+
+    return proj_distr
 
 class SACV(BasePolicy):
     def __init__(
@@ -59,6 +99,9 @@ class SACV(BasePolicy):
 
         if self.use_dist:
             assert isinstance(model.value_net, CriticModelDist)
+            self.v_min = model.value_net.v_min
+            self.v_max = model.value_net.v_max
+            self.num_atoms = model.value_net.num_atoms
 
         self.actor_eval = model.policy_net.to(device).train()
         self.critic_eval = model.value_net.to(device).train()
@@ -76,6 +119,7 @@ class SACV(BasePolicy):
         self.alpha_optim = optim.Adam([self.log_alpha], lr=self.lr)
         self.alpha = self.log_alpha.exp()
 
+
     def _tensor(self, data, use_cuda=False):
         if np.array(data).ndim == 1:
             data = torch.tensor(data, dtype=torch.float32).view(-1, 1)
@@ -85,10 +129,36 @@ class SACV(BasePolicy):
             data = data.to(device)
         return data
 
+    def learn_dist(self, obs, act, rew, next_obs, done):
+        with torch.no_grad():
+            next_act, next_log_pi = self.actor_target(next_obs)
+            # q(s, a) change to z(s, a) to discribe a distributional
+            z1_next, z2_next = self.critic_target.get_probs(next_obs, next_act) # [batch_size, num_atoms]
+           
+            z_next = torch.stack([torch.where(z1.sum() < z2.sum(), z1, z2) for z1, z2 in zip(z1_next, z2_next)])
+            z_next -= (self.alpha * next_log_pi)
+            z_projected = _l2_project(next_distr_v=z_next,
+                                         rewards_v=rew,
+                                         dones_mask_t=done,
+                                         gamma=self._gamma,
+                                         n_atoms=self.num_atoms,
+                                         v_min=self.v_min,
+                                         v_max=self.v_max,
+                                         )
+            z_target = torch.from_numpy(z_projected).float().to(device)
+
+        z1_eval, z2_eval = self.critic_eval(obs, act)
+        self.criterion = nn.BCELoss(reduction='none')
+        loss1 = self.criterion(z1_eval, z_target)
+        loss2 = self.criterion(z2_eval, z_target)
+        batch_loss = 0.5 * (loss1 + loss2)
+        return batch_loss
+
     def learn(self):
         pg_loss, q_loss, a_loss = 0, 0, 0
         for _ in range(self._update_iteration):
             if self.use_priority:
+                # s_{t}, n-step_rewards, s_{t+n}
                 tree_idxs, S, A, R, S_, M, weights = self.buffer.sample(self._batch_size)
                 W = torch.tensor(weights, dtype=torch.float32, device=device).view(-1, 1)
             else:
@@ -101,31 +171,27 @@ class SACV(BasePolicy):
             M = torch.tensor(M, dtype=torch.float32).view(-1, 1)
             S_ = torch.tensor(S_, dtype=torch.float32, device=device)
             
-            # S = self._tensor(S, use_cuda=True)
-            # A = self._tensor(A, use_cuda=True)
-            # R = self._tensor(R)
-            # M = self._tensor(M)
-            # S_ = self._tensor(S_, use_cuda=True)
-            # print (S_.device)
-            # print (device)
-            
             # print (f'size S:{S.size()}, A:{A.size()}, M:{M.size()}, R:{R.size()}, S_:{S_.size()}, W:{W.size()}')
-            with torch.no_grad():
-                next_A, next_log = self.actor_target.evaluate(S_)
-                q1_next, q2_next = self.critic_target(S_, next_A)
-                q_next = torch.min(q1_next, q2_next) - self.alpha * next_log
-                q_target = R + M * self._gamma * q_next.cpu()
-                q_target = q_target.to(device)
-            
-            # q_loss
-            q1_eval, q2_eval = self.critic_eval(S, A)
-            loss1 = self.criterion(q1_eval, q_target)
-            loss2 = self.criterion(q2_eval, q_target)
-            batch_loss = 0.5 * (loss1 + loss2)
+            if self.use_dist:
+                D = torch.stack([torch.where(mask > 0, 0, 1) for mask in M]).view(-1, 1)
+                batch_loss = self.learn_dist(S, A, R, S_, D)
+            else:
+                with torch.no_grad():
+                    next_A, next_log = self.actor_target.evaluate(S_)
+                    q1_next, q2_next = self.critic_target(S_, next_A)
+                    q_next = torch.min(q1_next, q2_next) - self.alpha * next_log
+                    q_target = R + M * self._gamma * q_next.cpu()
+                    q_target = q_target.to(device)
+                
+                # q_loss
+                q1_eval, q2_eval = self.critic_eval(S, A)
+                loss1 = self.criterion(q1_eval, q_target)
+                loss2 = self.criterion(q2_eval, q_target)
+                batch_loss = 0.5 * (loss1 + loss2)
 
             if self.use_priority:
                 critic_loss = (W * batch_loss).mean()
-                self.buffer.update_priorities(tree_idxs, abs(batch_loss.detach().cpu().numpy()))
+                self.buffer.update_priorities(tree_idxs, np.abs(batch_loss.detach().cpu().numpy()) + 1e-4)
             else:
                 critic_loss = batch_loss.mean()
 
@@ -138,11 +204,21 @@ class SACV(BasePolicy):
             alpha_loss = torch.tensor(0)
             if self._learn_critic_cnt % self.actor_learn_freq == 0:
                 curr_A, curr_log = self.actor_eval.evaluate(S)
-                q1_next, q2_next = self.critic_eval(S, curr_A)
-                q_next = torch.min(q1_next, q2_next)
-
-                # pg_loss
-                actor_loss = (self.alpha * curr_log - q_next).mean()
+                if self.use_dist:
+                    z1_next, z2_next = self.critic_eval.get_probs(S, curr_A)
+                    z_next = torch.stack([torch.where(z1.sum() < z2.sum(), z1, z2) for z1, z2 in zip(z1_next, z2_next)])
+                    num_atoms = torch.tensor(self.num_atoms, dtype=torch.float32, device=device)
+                    # actor_loss = z_next * num_atoms
+                    # actor_loss = torch.sum(actor_loss, dim=1)
+                    # actor_loss = -(actor_loss + self.alpha * curr_log).mean()
+                    actor_loss = -(z_next + self.alpha * curr_log) * num_atoms
+                    actor_loss = torch.sum(actor_loss, dim=1)
+                    actor_loss = actor_loss.mean()
+                else:
+                    q1_next, q2_next = self.critic_eval(S, curr_A)
+                    q_next = torch.min(q1_next, q2_next)
+                    # pg_loss
+                    actor_loss = -(q_next + self.alpha * curr_log).mean()
                 self.actor_eval_optim.zero_grad()
                 actor_loss.backward()
                 self.actor_eval_optim.step()
