@@ -11,6 +11,8 @@ from torch.distributions import Categorical
 from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 class A2C(BasePolicy): #option: double
     def __init__(
         self, 
@@ -41,9 +43,8 @@ class A2C(BasePolicy): #option: double
         self._verbose = verbose
         self.buffer = ReplayBuffer(buffer_size, replay=False)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.actor_eval = model.policy_net.to(self.device).train()
-        self.critic_eval = model.value_net.to(self.device).train()
+        self.actor_eval = model.policy_net.to(device).train()
+        self.critic_eval = model.value_net.to(device).train()
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
         
@@ -56,7 +57,7 @@ class A2C(BasePolicy): #option: double
     def learn(self):
         pg_loss, v_loss = 0, 0
         memory_split = self.buffer.split(self.buffer.all_memory()) # s, r, l, m
-        S = torch.tensor(memory_split['s'], dtype=torch.float32, device=self.device)
+        S = torch.tensor(memory_split['s'], dtype=torch.float32, device=device)
         R = torch.tensor(memory_split['r'], dtype=torch.float32).view(-1, 1)
         M = torch.tensor(memory_split['m'], dtype=torch.float32).view(-1, 1)
         # Log = torch.stack(list(memory_split['l'])).view(-1, 1)
@@ -68,7 +69,7 @@ class A2C(BasePolicy): #option: double
         rewards = R.numpy()
         masks = M.numpy()
         adv_gae_mc = self.GAE(rewards, v_evals, next_v_eval=0, masks=masks, gamma=self._gamma, lam=self._gae_lamda) # MC adv
-        advantage = torch.from_numpy(adv_gae_mc).to(self.device).reshape(-1, 1)
+        advantage = torch.from_numpy(adv_gae_mc).to(device).reshape(-1, 1)
 
         v_target = advantage + v_eval.detach()
         # critic_core

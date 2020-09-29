@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DDPG(BasePolicy):
     def __init__(
@@ -19,9 +20,10 @@ class DDPG(BasePolicy):
         actor_learn_freq=1,
         target_update_freq=0,
         target_update_tau=1,
-        learning_rate=3e-3,
+        learning_rate=1e-3,
         discount_factor=0.99,
         batch_size=100,
+        update_iteration=10,
         verbose=False,
     ):
         super().__init__()
@@ -33,17 +35,16 @@ class DDPG(BasePolicy):
         self.target_update_freq = target_update_freq
         self._gamma = discount_factor
         self._target = target_update_freq > 0
-        self._update_iteration = 10
+        self._update_iteration = update_iteration
         self._sync_cnt = 0
         self._learn_critic_cnt = 0
         self._learn_actor_cnt = 0
         self._verbose = verbose
         self._batch_size = batch_size
         self.buffer = ReplayBuffer(buffer_size)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.actor_eval = model.policy_net.to(self.device).train()  # pi(s)
-        self.critic_eval = model.value_net.to(self.device).train()  # Q(s, a)
+        self.actor_eval = model.policy_net.to(device).train()  # pi(s)
+        self.critic_eval = model.value_net.to(device).train()  # Q(s, a)
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
 
@@ -58,18 +59,18 @@ class DDPG(BasePolicy):
 
         for _ in range(self._update_iteration):
             batch_split = self.buffer.split_batch(self._batch_size)
-            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device)  # [batch_size, S.feature_size]
-            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).view(-1, 1)  # [batch_size, 1]
+            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=device)  # [batch_size, S.feature_size]
+            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=device).view(-1, 1)  # [batch_size, 1]
             M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
             R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
-            S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=self.device)
+            S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=device)
 
             with torch.no_grad():
                 q_next = self.critic_eval(S_, self.actor_eval(S_))
                 if self._target:
                     q_next = self.critic_target(S_, self.actor_target(S_))
                 q_target = R + M * self._gamma * q_next.cpu()
-                q_target = q_target.to(self.device)
+                q_target = q_target.to(device)
             # print (f'SIZE S {S.size()}, A {A.size()}')
             q_eval = self.critic_eval(S, A)  # [batch_size, q_value_size]
             critic_loss = self.criterion(q_eval, q_target)

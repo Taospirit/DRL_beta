@@ -10,6 +10,7 @@ from torch.distributions import Categorical, Normal
 # from abc import ABC, abstractmethod
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 class BasePolicy(object):
     def __init__(self, **kwargs):
         super().__init__()

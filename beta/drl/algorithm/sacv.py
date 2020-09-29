@@ -14,7 +14,6 @@ from drl.utils import PriorityReplayBuffer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
 def _l2_project(next_distr_v, rewards_v, dones_mask_t, gamma, n_atoms, v_min, v_max):
     next_distr = next_distr_v.data.cpu().numpy()
     rewards = rewards_v.data.cpu().numpy()
@@ -63,9 +62,8 @@ class SACV(BasePolicy):
         actor_learn_freq=1,
         target_update_freq=5,
         target_update_tau=0.01,
-        learning_rate=3e-3,
+        learning_rate=1e-3,
         discount_factor=0.99,
-        gae_lamda=1,
         verbose=False,
         update_iteration=10,
         use_priority=False,
@@ -79,7 +77,6 @@ class SACV(BasePolicy):
         self.actor_learn_freq = actor_learn_freq
         self.target_update_freq = target_update_freq
         self._gamma = discount_factor
-        self._gae_lamda = gae_lamda
         self._target = target_update_freq > 0
         self._update_iteration = update_iteration
         self._sync_cnt = 0

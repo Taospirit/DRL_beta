@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class TD3(BasePolicy):
     def __init__(
@@ -22,6 +23,7 @@ class TD3(BasePolicy):
         learning_rate=3e-3,
         discount_factor=0.99,
         batch_size=100,
+        update_iteration=10,
         verbose=False,
     ):
         super().__init__()
@@ -32,17 +34,16 @@ class TD3(BasePolicy):
         self.actor_learn_freq = actor_learn_freq
         self.target_update_freq = target_update_freq
         self._gamma = discount_factor
-        self._update_iteration = 10
+        self._update_iteration = update_iteration
         self._sync_cnt = 0
         self._learn_critic_cnt = 0
         self._learn_actor_cnt = 0
         self._verbose = verbose
         self._batch_size = batch_size
         self.buffer = ReplayBuffer(buffer_size)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.actor_eval = model.policy_net.to(self.device).train()
-        self.critic_eval = model.value_net.to(self.device).train()
+        self.actor_eval = model.policy_net.to(device).train()
+        self.critic_eval = model.value_net.to(device).train()
 
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
@@ -60,11 +61,11 @@ class TD3(BasePolicy):
 
         for _ in range(self._update_iteration):
             batch_split = self.buffer.split_batch(self._batch_size)
-            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device)  # [batch_size, S.feature_size]
-            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).view(-1, 1)
+            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=device)  # [batch_size, S.feature_size]
+            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=device).view(-1, 1)
             M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
             R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
-            S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=self.device)
+            S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=device)
             # print (f'SIZE S {S.size()}, A {A.size()}, M {M.size()}, R {R.size()}, S_ {S_.size()}')
 
             A_noise = self.actor_target.action(S_, self.noise_std, self.noise_clip)
@@ -72,7 +73,7 @@ class TD3(BasePolicy):
                 q1_next, q2_next = self.critic_target.twinQ(S_, A_noise)
                 q_next = torch.min(q1_next, q2_next)
                 q_target = R + M * self._gamma * q_next.cpu()
-                q_target = q_target.to(self.device)
+                q_target = q_target.to(device)
 
             q1_eval, q2_eval = self.critic_eval.twinQ(S, A)
             loss1 = self.criterion(q1_eval, q_target)

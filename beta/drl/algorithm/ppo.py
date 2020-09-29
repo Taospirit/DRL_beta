@@ -11,6 +11,7 @@ from torch.distributions import Normal
 from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class PPO(BasePolicy):  # option: double
     def __init__(
@@ -53,9 +54,8 @@ class PPO(BasePolicy):  # option: double
         self._normalized = lambda x, e: (x - x.mean()) / (x.std() + e)
         self.buffer = ReplayBuffer(buffer_size, replay=False)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.actor_eval = model.policy_net.to(self.device).train()
-        self.critic_eval = model.value_net.to(self.device).train()
+        self.actor_eval = model.policy_net.to(device).train()
+        self.critic_eval = model.value_net.to(device).train()
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
 
@@ -69,7 +69,7 @@ class PPO(BasePolicy):  # option: double
         self.criterion = nn.SmoothL1Loss()
 
     # def choose_action(self, state, test=False):
-    #     state = torch.tensor(state, dtype=torch.float32, device=self.device)
+    #     state = torch.tensor(state, dtype=torch.float32, device=device)
     #     # if test:
     #     #     self.actor_eval.eval()
     #     # with torch.no_grad():
@@ -104,11 +104,11 @@ class PPO(BasePolicy):  # option: double
         loss_critic_avg = 0
 
         memory_split = self.buffer.split(self.buffer.all_memory())
-        S = torch.tensor(memory_split['s'], dtype=torch.float32, device=self.device)
-        A = torch.tensor(memory_split['a'], dtype=torch.float32, device=self.device).view(-1, 1)
-        S_ = torch.tensor(memory_split['s_'], dtype=torch.float32, device=self.device)
+        S = torch.tensor(memory_split['s'], dtype=torch.float32, device=device)
+        A = torch.tensor(memory_split['a'], dtype=torch.float32, device=device).view(-1, 1)
+        S_ = torch.tensor(memory_split['s_'], dtype=torch.float32, device=device)
         R = torch.tensor(memory_split['r'], dtype=torch.float32).view(-1, 1)
-        Log = torch.tensor(memory_split['l'], dtype=torch.float32, device=self.device).view(-1, 1)
+        Log = torch.tensor(memory_split['l'], dtype=torch.float32, device=device).view(-1, 1)
 
         # print (f'Size S {S.size()}, A {A.size()}, S_ {S_.size()}, R {R.size()}, Log {Log.size()}')
         # print (f'S {S}, A {A}, S_ {S_}, R {R}, Log {Log}')
@@ -120,7 +120,7 @@ class PPO(BasePolicy):  # option: double
         # rewards = rewards.cpu().numpy()
         adv_gae_td = self.GAE(rewards, v_evals, next_v_eval=end_v_eval,
                               gamma=self._gamma, lam=self._gae_lam)  # td_error adv
-        advantage = torch.from_numpy(adv_gae_td).to(self.device).unsqueeze(-1)
+        advantage = torch.from_numpy(adv_gae_td).to(device).unsqueeze(-1)
         advantage = self._normalized(advantage, 1e-10) if self.adv_norm else advantage
 
         # indices = [i for i in range(len(self.buffer))]

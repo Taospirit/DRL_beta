@@ -11,22 +11,21 @@ from torch.distributions import Normal
 from drl.algorithm import BasePolicy
 from drl.utils import ReplayBuffer
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 class SAC(BasePolicy):
     def __init__(
         self, 
         model,
-        # v_net,
         buffer_size=1000,
         batch_size=100,
         actor_learn_freq=1,
         target_update_freq=5,
         target_update_tau=0.01,
-        learning_rate=3e-3,
+        learning_rate=1e-3,
         discount_factor=0.99,
-        gae_lamda=1,
         verbose=False,
         update_iteration=10,
-        use_priority=False
         ):
         super().__init__()
         self.lr = learning_rate
@@ -36,21 +35,18 @@ class SAC(BasePolicy):
         self.actor_learn_freq = actor_learn_freq
         self.target_update_freq = target_update_freq
         self._gamma = discount_factor
-        self._gae_lamda = gae_lamda
         self._target = target_update_freq > 0
         self._update_iteration = update_iteration
         self._sync_cnt = 0
-        # self._learn_cnt = 0
         self._learn_critic_cnt = 0
         self._learn_actor_cnt = 0
         self._verbose = verbose
         self._batch_size = batch_size
         self.buffer = ReplayBuffer(buffer_size) # off-policy
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.actor_eval = model.policy_net.to(self.device).train()
-        self.critic_eval = model.value_net.to(self.device).train()
-        self.value_eval = model.v_net.to(self.device).train()
+        self.actor_eval = model.policy_net.to(device).train()
+        self.critic_eval = model.value_net.to(device).train()
+        self.value_eval = model.v_net.to(device).train()
 
         self.value_target = self.copy_net(self.value_eval)
         
@@ -64,11 +60,11 @@ class SAC(BasePolicy):
         pg_loss, v_loss, q_loss = 0, 0, 0
         for _ in range(self._update_iteration):
             batch_split = self.buffer.split_batch(self._batch_size)
-            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=self.device)
-            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=self.device).view(-1, 1)
+            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=device)
+            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=device).view(-1, 1)
             M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
             R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
-            S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=self.device)
+            S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=device)
 
             new_A, log_prob = self.actor_eval.evaluate(S)
             
@@ -82,8 +78,10 @@ class SAC(BasePolicy):
             q1_value, q2_value = self.critic_eval(S, A)
             target_value = self.value_target(S_)
             target_q_value = R + M * self._gamma * target_value.cpu()
-            target_q_value = target_q_value.to(self.device)
-            q_value_loss = 0.5 * (self.criterion(q1_value, target_q_value.detach()) + self.criterion(q2_value, target_q_value.detach()))
+            target_q_value = target_q_value.to(device)
+            loss1 = self.criterion(q1_value, target_q_value.detach())
+            loss2 = self.criterion(q2_value, target_q_value.detach())
+            q_value_loss = 0.5 * (loss1 + loss2)
 
             # policy loss
             policy_loss = (log_prob - torch.min(new_q1_value, new_q2_value)).mean()
