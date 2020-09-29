@@ -1,3 +1,4 @@
+#region
 import gym
 import os
 from os.path import abspath, dirname
@@ -6,21 +7,22 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from torch.distributions import Categorical, Normal
 from torch.utils.tensorboard import SummaryWriter
-from torch.distributions import Categorical
 from collections import namedtuple
+import numpy as np
 
 from drl.algorithm import DDPG
 from utils.plot import plot
 from utils.config import config
-import numpy as np
 
-# config
+#config
 config = config['ddpg']
+
 env_name = config['env_name']
 buffer_size = config['buffer_size']
 actor_learn_freq = config['actor_learn_freq']
+update_iteration = config['update_iteration']
 target_update_freq = config['target_update_freq']
 batch_size = config['batch_size']
 hidden_dim = config['hidden_dim']
@@ -32,7 +34,6 @@ LOG_DIR = config['LOG_DIR']
 SAVE_DIR = config['SAVE_DIR'] + env_name
 POLT_NAME = config['POLT_NAME'] + env_name
 PKL_DIR = config['PKL_DIR'] + env_name
-
 
 file_path = abspath(dirname(__file__))
 pkl_dir = file_path + PKL_DIR
@@ -50,29 +51,40 @@ except FileExistsError:
 env = gym.make(env_name)
 env = env.unwrapped
 
-# Parameters
+#Parameters
 state_space = env.observation_space.shape[0]
 action_space = env.action_space.shape[0]
 action_max = env.action_space.high[0]
 action_scale = (env.action_space.high - env.action_space.low) / 2
 action_bias = (env.action_space.high + env.action_space.low) / 2
+#endregion
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def layer_norm(layer, std=1.0, bias_const=1e-6):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
 
 class ActorModel(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(state_dim, hidden_dim), nn.ReLU(),
-                                 nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-                                 nn.Linear(hidden_dim, action_dim), nn.Tanh(), )
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    def forward(self, state):
-        action = self.net(state)
-        return action
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.out = nn.Linear(hidden_dim, action_dim)
+        layer_norm(self.fc1, std=1.0)
+        layer_norm(self.fc2, std=1.0)
+        layer_norm(self.out, std=1.0)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        out = F.tanh(self.out(x))
+        return out
 
     def action(self, state, noise_std=0, noise_clip=0.5):
-        action = self.net(state)
+        action = self.forward(state)
         if noise_std:
-            noise_norm = torch.ones_like(action).data.normal_(0, noise_std).to(self.device)
+            noise_norm = torch.ones_like(action).data.normal_(0, noise_std).to(device)
             action += noise_norm.clamp(-noise_clip, noise_clip)
         action = action.clamp(-action_max, action_max)
         return action
@@ -80,15 +92,19 @@ class ActorModel(nn.Module):
 class CriticModel(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
-        # inpur_dim = state_dim + action_dim, 
-        self.net = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
-                                 nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-                                 nn.Linear(hidden_dim, 1), )
+        self.fc1 = nn.Linear(state_dim + action_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.q_value = nn.Linear(hidden_dim, 1)
+        layer_norm(self.fc1, std=1.0)
+        layer_norm(self.fc2, std=1.0)
+        layer_norm(self.q_value, std=1.0)
 
     def forward(self, state, action):
         x = torch.cat((state, action), dim=1)
-        q_value = self.net(x)
-        return q_value
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        q = self.q_value(x)
+        return q
 
 TRAIN = True
 PLOT = True
@@ -99,12 +115,12 @@ def map_action(action):
         action = action.item()
     return action * action_scale + action_bias
 
-def sample(env, policy, max_step):
+def sample(env, policy, max_step, warm_up=False):
     rewards = []
     state = env.reset()
     for step in range(max_step):
         #==============choose_action==============
-        action = policy.choose_action(state)
+        action = policy.choose_action(state) if not warm_up else env.action_space.sample()
         next_state, reward, done, info = env.step(map_action(action))
         if TRAIN:
             mask = 0 if done else 1
@@ -119,14 +135,23 @@ def sample(env, policy, max_step):
     return rewards
 
 def train():
-    mean, std = [], []
+    model = namedtuple('model', ['policy_net', 'value_net'])
+    actor = ActorModel(state_space, hidden_dim, action_space)
+    critic = CriticModel(state_space, hidden_dim, action_space)
+    rl_agent = model(actor, critic)
+    policy = DDPG(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
+        update_iteration=update_iteration, target_update_freq=target_update_freq, 
+        batch_size=batch_size, learning_rate=lr)
+    writer = SummaryWriter(writer_path)
+
     if not TRAIN:
         policy.load_model(model_save_dir, save_file, load_actor=True)
+    mean, std = [], []
     live_time = []
 
-    # while policy.warm_up():
-    #     sample(env, policy, max_step)
-    #     print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
+    while policy.warm_up():
+        sample(env, policy, max_step, warm_up=True)
+        print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
 
     for i_eps in range(episodes):
         rewards = sample(env, policy, max_step)
@@ -157,34 +182,27 @@ def train():
     return mean, std
 
 if __name__ == '__main__':
-    means, stds = [], []
-    model = namedtuple('model', ['policy_net', 'value_net'])
-    # for i in range(5):
-    #     learn_freq = 2*i +1
+    env.seed(1)
+    torch.manual_seed(1)
+    #for logistic test
+    train()
 
-    for seed in range(5):
-        env.seed(seed  * 10)
-        torch.manual_seed(seed * 10)
-        # env.seed(1)
-        # torch.manual_seed(1)
+    # means, stds = [], []
+    # for seed in range(5):
+    #     env.seed(seed  * 10)
+    #     torch.manual_seed(seed * 10)
+    #     # env.seed(1)
+    #     # torch.manual_seed(1)
+    #     mean, std = train()
+    #     means.append(mean)
+    #     stds.append(std)
 
-        actor = ActorModel(state_space, hidden_dim, action_space)
-        critic = CriticModel(state_space, hidden_dim, action_space)
-        rl_agent = model(actor, critic)
-        policy = DDPG(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
-            target_update_freq=target_update_freq, batch_size=batch_size, learning_rate=lr)
-        writer = SummaryWriter(writer_path)
+    # d = {'mean': means, 'std': stds}
+    # import pickle
+    # pkl_name = '.pkl'
+    # with open(pkl_dir + pkl_name, 'wb') as f:
+    #     pickle.dump(d, f, pickle.HIGHEST_PROTOCOL)
 
-        mean, std = train()
-        means.append(mean)
-        stds.append(std)
+    # # print (f'finish learning at actor_learn_freq:{learn_freq}') 
 
-    d = {'mean': means, 'std': stds}
-    import pickle
-    pkl_name = '.pkl'
-    with open(pkl_dir + pkl_name, 'wb') as f:
-        pickle.dump(d, f, pickle.HIGHEST_PROTOCOL)
-
-    # print (f'finish learning at actor_learn_freq:{learn_freq}') 
-
-    print ('finish all learning!')
+    # print ('finish all learning!')
