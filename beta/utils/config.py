@@ -6,6 +6,7 @@ config = {
         'actor_learn_freq': 1,
         'update_iteration': 10,
         'target_update_freq': 10,
+        'target_update_tau': 1e-1, # to large
         'lr': 3e-3,
         'batch_size': 128,
         'hidden_dim': 32,
@@ -23,6 +24,7 @@ config = {
         'actor_learn_freq': 2,
         'update_iteration': 10,
         'target_update_freq': 10,
+        'target_update_tau': 1e-1, # to large
         'lr': 3e-3,
         'batch_size': 128,
         'hidden_dim': 32,
@@ -40,6 +42,7 @@ config = {
         'actor_learn_freq': 2,
         'update_iteration': 10,
         'target_update_freq': 10,
+        'target_update_tau': 1e-2,
         'lr': 3e-3,
         'batch_size': 128,
         'hidden_dim': 32,
@@ -57,6 +60,7 @@ config = {
         'actor_learn_freq': 1,
         'update_iteration': 10,
         'target_update_freq': 10,
+        'target_update_tau': 1e-2,
         'lr': 3e-3, # notice
         'batch_size': 128,
         'hidden_dim': 32,

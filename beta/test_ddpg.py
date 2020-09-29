@@ -28,6 +28,7 @@ batch_size = config['batch_size']
 hidden_dim = config['hidden_dim']
 episodes = config['episodes'] + 10
 max_step = config['max_step']
+target_update_tau = config['target_update_tau']
 lr = config['lr']
 
 LOG_DIR = config['LOG_DIR']
@@ -140,8 +141,8 @@ def train():
     critic = CriticModel(state_space, hidden_dim, action_space)
     rl_agent = model(actor, critic)
     policy = DDPG(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
-        update_iteration=update_iteration, target_update_freq=target_update_freq, 
-        batch_size=batch_size, learning_rate=lr)
+        update_iteration=update_iteration, target_update_freq=target_update_freq,
+        target_update_tau=target_update_tau, batch_size=batch_size, learning_rate=lr)
     writer = SummaryWriter(writer_path)
 
     if not TRAIN:
@@ -173,8 +174,7 @@ def train():
                 writer.add_scalar('loss/pg_loss', pg_loss, global_step=i_eps)
                 writer.add_scalar('loss/q_loss', q_loss, global_step=i_eps)
             if i_eps % 5 == 0:
-                pass
-                # print (f'EPS:{i_eps}, reward_mean:{round(reward_mean, 3)}, pg_loss:{round(pg_loss, 3)}, q_loss:{round(q_loss, 3)}')
+                print (f'EPS:{i_eps}, reward_mean:{round(reward_mean, 3)}, pg_loss:{round(pg_loss, 3)}, q_loss:{round(q_loss, 3)}')
             if i_eps % 200 == 0:
                 policy.save_model(model_save_dir, save_file, save_actor=True, save_critic=True)
     writer.close()

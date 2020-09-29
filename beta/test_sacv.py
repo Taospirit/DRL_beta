@@ -29,6 +29,7 @@ batch_size = config['batch_size']
 hidden_dim = config['hidden_dim']
 episodes = config['episodes'] + 10
 max_step = config['max_step']
+target_update_tau = config['target_update_tau']
 lr = config['lr']
 
 LOG_DIR = config['LOG_DIR']
@@ -231,7 +232,8 @@ def train():
     rl_agent = model(actor, critic)
     policy = SAC(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
             update_iteration=update_iteration, target_update_freq=target_update_freq, 
-            batch_size=batch_size, learning_rate=lr, use_priority=use_priority)
+            target_update_tau=target_update_tau, batch_size=batch_size, 
+            learning_rate=lr, use_priority=use_priority)
     writer = SummaryWriter(writer_path)
 
     if not TRAIN:

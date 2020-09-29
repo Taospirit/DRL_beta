@@ -21,7 +21,7 @@ class SAC(BasePolicy):
         batch_size=100,
         actor_learn_freq=1,
         target_update_freq=5,
-        target_update_tau=0.01,
+        target_update_tau=1e-2,
         learning_rate=1e-3,
         discount_factor=0.99,
         verbose=False,

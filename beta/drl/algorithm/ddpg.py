@@ -19,7 +19,7 @@ class DDPG(BasePolicy):
         buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
-        target_update_tau=1,
+        target_update_tau=1e-2,
         learning_rate=1e-3,
         discount_factor=0.99,
         batch_size=100,

@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from collections import namedtuple
 import numpy as np
 
-from drl.algorithm import SAC as SAC
+from drl.algorithm import SAC2 as SAC
 from utils.plot import plot
 from utils.config import config
 
@@ -29,6 +29,7 @@ batch_size = config['batch_size']
 hidden_dim = config['hidden_dim']
 episodes = config['episodes'] + 10
 max_step = config['max_step']
+target_update_tau = config['target_update_tau']
 lr = config['lr']
 
 LOG_DIR = config['LOG_DIR']
@@ -114,26 +115,19 @@ class ActorModel(nn.Module):
 class CriticModel(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
-        self.net1 = self.build_net(state_dim, hidden_dim, action_dim)
-        self.net2 = self.build_net(state_dim, hidden_dim, action_dim)
-    
-    def build_net(self, state_dim, hidden_dim, action_dim):
-        self.fc1 = nn.Linear(state_dim + action_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.q_value = nn.Linear(hidden_dim, 1)
-        layer_norm(self.fc1, std=1.0)
-        layer_norm(self.fc2, std=1.0)
-        layer_norm(self.q_value, std=1.0)
-        self.net = nn.Sequential(self.fc1, nn.ReLU(),
-                                 self.fc2, nn.ReLU(),
-                                 self.q_value, )
-        return self.net
+        self.net1 = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, 1), )
+        self.net2 = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, 1), )
 
     def forward(self, state, action):
         x = torch.cat((state, action), dim=1)
-        q1 = self.net1(x)
-        q2 = self.net2(x)
-        return q1, q2
+        q1_value = self.net1(x)
+        q2_value = self.net2(x)
+        return q1_value, q2_value
+
 
 
 class ValueModel(nn.Module):
@@ -191,7 +185,7 @@ def train():
     rl_agent = model(actor, critic, v_net)
     policy = SAC(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
             update_iteration=update_iteration, target_update_freq=target_update_freq, 
-            batch_size=batch_size, learning_rate=lr)
+            target_update_tau=target_update_tau, batch_size=batch_size, learning_rate=lr)
     writer = SummaryWriter(writer_path)
 
     if not TRAIN:

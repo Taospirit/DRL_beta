@@ -20,10 +20,10 @@ class PPO(BasePolicy):  # option: double
         buffer_size=1000,
         actor_learn_freq=1,
         target_update_freq=0,
-        target_update_tau=5e-3,
+        target_update_tau=1e-2,
         learning_rate=0.0001,
         discount_factor=0.99,
-        gae_lamda=0,  # td
+        gae_lamda=0.95,
         batch_size=100,
         verbose=False
     ):
