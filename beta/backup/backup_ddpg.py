@@ -13,25 +13,24 @@ from collections import namedtuple
 
 from drl.algorithm import DDPG
 from utils.plot import plot
-from utils.config import config
 import numpy as np
 
 # config
-config = config['ddpg']
-env_name = config['env_name']
-buffer_size = config['buffer_size']
-actor_learn_freq = config['actor_learn_freq']
-target_update_freq = config['target_update_freq']
-batch_size = config['batch_size']
-hidden_dim = config['hidden_dim']
-episodes = config['episodes'] + 10
-max_step = config['max_step']
-lr = config['lr']
+env_name = 'Pendulum-v0'
+buffer_size = 50000
+actor_learn_freq = 1
+update_iteration = 10
+target_update_freq = 10
+batch_size = 128
+hidden_dim = 32
+episodes = 2000 + 10
+max_step = 300
+lr = 1e-3
 
-LOG_DIR = config['LOG_DIR']
-SAVE_DIR = config['SAVE_DIR'] + env_name
-POLT_NAME = config['POLT_NAME'] + env_name
-PKL_DIR = config['PKL_DIR'] + env_name
+LOG_DIR = '/logs'
+SAVE_DIR = '/save/ddpg_' + env_name
+POLT_NAME = 'DDPG_' + env_name
+PKL_DIR = '/pkl/ddpg_' + env_name
 
 
 file_path = abspath(dirname(__file__))
@@ -157,34 +156,11 @@ def train():
     return mean, std
 
 if __name__ == '__main__':
-    means, stds = [], []
     model = namedtuple('model', ['policy_net', 'value_net'])
-    # for i in range(5):
-    #     learn_freq = 2*i +1
-
-    for seed in range(5):
-        env.seed(seed  * 10)
-        torch.manual_seed(seed * 10)
-        # env.seed(1)
-        # torch.manual_seed(1)
-
-        actor = ActorModel(state_space, hidden_dim, action_space)
-        critic = CriticModel(state_space, hidden_dim, action_space)
-        rl_agent = model(actor, critic)
-        policy = DDPG(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
-            target_update_freq=target_update_freq, batch_size=batch_size, learning_rate=lr)
-        writer = SummaryWriter(writer_path)
-
-        mean, std = train()
-        means.append(mean)
-        stds.append(std)
-
-    d = {'mean': means, 'std': stds}
-    import pickle
-    pkl_name = '.pkl'
-    with open(pkl_dir + pkl_name, 'wb') as f:
-        pickle.dump(d, f, pickle.HIGHEST_PROTOCOL)
-
-    # print (f'finish learning at actor_learn_freq:{learn_freq}') 
-
-    print ('finish all learning!')
+    actor = ActorModel(state_space, hidden_dim, action_space)
+    critic = CriticModel(state_space, hidden_dim, action_space)
+    rl_agent = model(actor, critic)
+    policy = DDPG(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
+        target_update_freq=target_update_freq, batch_size=batch_size, learning_rate=lr)
+    writer = SummaryWriter(writer_path)
+    train()
