@@ -191,7 +191,7 @@ class SACV(BasePolicy):
 
             if self.use_priority:
                 critic_loss = (W * batch_loss).mean()
-                self.buffer.update_priorities(tree_idxs, np.abs(batch_loss.detach().cpu().numpy()) + 1e-4)
+                self.buffer.update_priorities(tree_idxs, np.abs(batch_loss.detach().cpu().numpy()) + 1e-6)
             else:
                 critic_loss = batch_loss.mean()
 
@@ -211,14 +211,15 @@ class SACV(BasePolicy):
                     # actor_loss = z_next * num_atoms
                     # actor_loss = torch.sum(actor_loss, dim=1)
                     # actor_loss = -(actor_loss + self.alpha * curr_log).mean()
-                    actor_loss = -(z_next + self.alpha * curr_log) * num_atoms
+                    actor_loss = (self.alpha * curr_log - z_next) * num_atoms
                     actor_loss = torch.sum(actor_loss, dim=1)
                     actor_loss = actor_loss.mean()
                 else:
                     q1_next, q2_next = self.critic_eval(S, curr_A)
                     q_next = torch.min(q1_next, q2_next)
                     # pg_loss
-                    actor_loss = -(q_next + self.alpha * curr_log).mean()
+                    actor_loss = (self.alpha * curr_log - q_next).mean()
+
                 self.actor_eval_optim.zero_grad()
                 actor_loss.backward()
                 self.actor_eval_optim.step()
