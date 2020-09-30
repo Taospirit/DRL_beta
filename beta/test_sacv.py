@@ -163,7 +163,8 @@ class CriticModel(nn.Module):
 
 
 class CriticModelDist(nn.Module):
-    def __init__(self, obs_dim, mid_dim, act_dim, v_min, v_max, num_atoms=51):
+    def __init__(self, obs_dim, mid_dim, act_dim, v_min=0, v_max=25, num_atoms=51):
+        super().__init__()
         self.net1 = nn.Sequential(nn.Linear(obs_dim + act_dim , mid_dim), nn.ReLU(),
                                  nn.Linear(mid_dim, mid_dim), nn.ReLU(),
                                  nn.Linear(mid_dim, num_atoms), )
@@ -189,12 +190,15 @@ class CriticModelDist(nn.Module):
         z2 = self.net2(x)
         return z1, z2
 
-    def get_probs(self, obs, act):
+    def get_probs(self, obs, act, log=False):
         z1, z2 = self.forward(obs, act)
-        z1 = torch.log_softmax(z1, dim=1)
-        z2 = torch.log_softmax(z2, dim=1)
+        if log:
+            z1 = torch.log_softmax(z1, dim=1)
+            z2 = torch.log_softmax(z2, dim=1)
+        else:
+            z1 = torch.softmax(z1, dim=1)
+            z2 = torch.softmax(z2, dim=1)
         return z1, z2
-
 
 TRAIN = True
 PLOT = True
@@ -227,11 +231,12 @@ def sample(env, policy, max_step, warm_up=False):
 def train():
     model = namedtuple('model', ['policy_net', 'value_net'])
     actor = ActorModel(state_space, hidden_dim, action_space)
-    critic = CriticModel(state_space, hidden_dim, action_space)
+    # critic = CriticModel(state_space, hidden_dim, action_space)
+    critic = CriticModelDist(state_space, hidden_dim, action_space)
     rl_agent = model(actor, critic)
     policy = SAC(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
             update_iteration=update_iteration, target_update_freq=target_update_freq, 
-            batch_size=batch_size, learning_rate=lr, use_priority=use_priority)
+            batch_size=batch_size, learning_rate=lr, use_priority=use_priority, use_dist=True)
     writer = SummaryWriter(writer_path)
 
     if not TRAIN:

@@ -21,6 +21,7 @@ def _l2_project(next_distr_v, rewards_v, dones_mask_t, gamma, n_atoms, v_min, v_
     batch_size = len(rewards)
     proj_distr = np.zeros((batch_size, n_atoms), dtype=np.float32)
     delta_z = (v_max - v_min) / (n_atoms - 1)
+    rewards = np.squeeze(rewards, axis=1)
 
     for atom in range(n_atoms):
         tz_j = np.minimum(v_max, np.maximum(v_min, rewards + (v_min + atom * delta_z) * gamma))
@@ -28,6 +29,8 @@ def _l2_project(next_distr_v, rewards_v, dones_mask_t, gamma, n_atoms, v_min, v_
         l = np.floor(b_j).astype(np.int64)
         u = np.ceil(b_j).astype(np.int64)
         eq_mask = u == l
+        # print (eq_mask.shape, l.shape)
+        # print (eq_mask)
         proj_distr[eq_mask, l[eq_mask]] += next_distr[eq_mask, atom]
         ne_mask = u != l
         proj_distr[ne_mask, l[ne_mask]] += next_distr[ne_mask, atom] * (u - b_j)[ne_mask]
@@ -50,8 +53,8 @@ def _l2_project(next_distr_v, rewards_v, dones_mask_t, gamma, n_atoms, v_min, v_
         if ne_dones.any():
             proj_distr[ne_dones, l[ne_mask]] = (u - b_j)[ne_mask]
             proj_distr[ne_dones, u[ne_mask]] = (b_j - l)[ne_mask]
-
     return proj_distr
+
 
 class SACV(BasePolicy):
     def __init__(
@@ -66,6 +69,7 @@ class SACV(BasePolicy):
         discount_factor=0.99,
         verbose=False,
         update_iteration=10,
+        action_dim=1,
         use_priority=False,
         use_dist=False
         ):
@@ -95,10 +99,14 @@ class SACV(BasePolicy):
             self.buffer = ReplayBuffer(buffer_size) # off-policy
 
         if self.use_dist:
-            assert isinstance(model.value_net, CriticModelDist)
+            assert model.value_net.num_atoms
+            # assert isinstance(model.value_net, CriticModelDist)
             self.v_min = model.value_net.v_min
             self.v_max = model.value_net.v_max
             self.num_atoms = model.value_net.num_atoms
+            self.delta_z = (self.v_max - self.v_min) / (self.num_atoms - 1)
+            self.support = torch.linspace(self.v_min, self.v_max, self.num_atoms).to(device)
+
 
         self.actor_eval = model.policy_net.to(device).train()
         self.critic_eval = model.value_net.to(device).train()
@@ -126,28 +134,29 @@ class SACV(BasePolicy):
             data = data.to(device)
         return data
 
-    def learn_dist(self, obs, act, rew, next_obs, done):
+    def learn_dist(self, obs, act, rew, next_obs, mask):
         with torch.no_grad():
             next_act, next_log_pi = self.actor_target(next_obs)
             # q(s, a) change to z(s, a) to discribe a distributional
             z1_next, z2_next = self.critic_target.get_probs(next_obs, next_act) # [batch_size, num_atoms]
-           
             z_next = torch.stack([torch.where(z1.sum() < z2.sum(), z1, z2) for z1, z2 in zip(z1_next, z2_next)])
             z_next -= (self.alpha * next_log_pi)
-            z_projected = _l2_project(next_distr_v=z_next,
-                                         rewards_v=rew,
-                                         dones_mask_t=done,
-                                         gamma=self._gamma,
-                                         n_atoms=self.num_atoms,
-                                         v_min=self.v_min,
-                                         v_max=self.v_max,
-                                         )
-            z_target = torch.from_numpy(z_projected).float().to(device)
+            Tz = rew.unsqueeze(1) + mask * self.support.unsqueeze(0)
+            Tz = Tz.clamp(min=self.v_min, max=self.v_max)
 
-        z1_eval, z2_eval = self.critic_eval(obs, act)
-        self.criterion = nn.BCELoss(reduction='none')
-        loss1 = self.criterion(z1_eval, z_target)
-        loss2 = self.criterion(z2_eval, z_target)
+            b = (Tz - self.v_min) / self.delta_z
+            l, u = b.floor().to(torch.int64), b.ceil().to(torch.int64)
+            l[(u > 0) * (l == u)] -= 1
+            u[(l < (self.num_atoms - 1)) * (l == u)] += 1
+
+            m = obs.new_zeros(self._batch_size, self.num_atoms)
+            offset = torch.linspace(0, ((self._batch_size - 1) * self.num_atoms), self._batch_size).unsqueeze(1).expand(self._batch_size, self.num_atoms).to(act)
+            m.view(-1).index_add_(0, (l + offset).view(-1), (z_next * (u.float() - b)).view(-1))  # m_l = m_l + p(s_t+n, a*)(u - b)
+            m.view(-1).index_add_(0, (u + offset).view(-1), (z_next * (b - l.float())).view(-1))  # m_u = m_u + p(s_t+n, a*)(b - l)
+
+        log_z1, log_z2 = self.critic_eval.get_probs(obs, act, log=True)
+        loss1 = -(m * log_z1).sum(dim=1)
+        loss2 = -(m * log_z2).sum(dim=1)
         batch_loss = 0.5 * (loss1 + loss2)
         return batch_loss
 
@@ -170,8 +179,15 @@ class SACV(BasePolicy):
             
             # print (f'size S:{S.size()}, A:{A.size()}, M:{M.size()}, R:{R.size()}, S_:{S_.size()}, W:{W.size()}')
             if self.use_dist:
-                D = torch.stack([torch.where(mask > 0, 0, 1) for mask in M]).view(-1, 1)
-                batch_loss = self.learn_dist(S, A, R, S_, D)
+                # print (M[0].size())
+                # print (M[0])
+                # print (M[0].item())
+                # assert 0
+                # D = torch.from_numpy(np.array([1^int(mask.item()) for mask in M])).view(-1, 1)
+                # print (f'size S:{S.shape}, A:{A.size()}, M:{M.size()}, R:{R.size()}, S_:{S_.size()}, D:{D.size()}')
+                # assert 0
+                batch_loss = self.learn_dist(S, A, R, S_, M)
+
             else:
                 with torch.no_grad():
                     next_A, next_log = self.actor_target.evaluate(S_)
@@ -208,7 +224,7 @@ class SACV(BasePolicy):
                     # actor_loss = z_next * num_atoms
                     # actor_loss = torch.sum(actor_loss, dim=1)
                     # actor_loss = -(actor_loss + self.alpha * curr_log).mean()
-                    actor_loss = (self.alpha * curr_log - z_next) * num_atoms
+                    actor_loss = (self.alpha * curr_log - z_next)
                     actor_loss = torch.sum(actor_loss, dim=1)
                     actor_loss = actor_loss.mean()
                 else:

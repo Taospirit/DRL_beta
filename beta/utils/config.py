@@ -54,7 +54,7 @@ config = {
     {
         'env_name': 'Pendulum-v0',
         'buffer_size': 50000,
-        'actor_learn_freq': 1,
+        'actor_learn_freq': 2,
         'update_iteration': 10,
         'target_update_freq': 10,
         'lr': 3e-3, # notice
