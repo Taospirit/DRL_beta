@@ -11,11 +11,12 @@ from torch.distributions import Categorical, Normal
 from torch.utils.tensorboard import SummaryWriter
 from collections import namedtuple
 import numpy as np
+import sys
+sys.path.append('..')
 
 from drl.algorithm import DDPG
 from utils.plot import plot
 from utils.config import config
-
 #config
 config = config['ddpg']
 
@@ -78,7 +79,7 @@ class ActorModel(nn.Module):
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        out = F.tanh(self.out(x))
+        out = torch.tanh(self.out(x))
         return out
 
     def action(self, state, noise_std=0, noise_clip=0.5):
@@ -87,7 +88,7 @@ class ActorModel(nn.Module):
             noise_norm = torch.ones_like(action).data.normal_(0, noise_std).to(device)
             action += noise_norm.clamp(-noise_clip, noise_clip)
         action = action.clamp(-action_max, action_max)
-        return action
+        return action.detach().cpu().numpy()
 
 class CriticModel(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
@@ -140,8 +141,8 @@ def train():
     critic = CriticModel(state_space, hidden_dim, action_space)
     rl_agent = model(actor, critic)
     policy = DDPG(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
-        update_iteration=update_iteration, target_update_freq=target_update_freq, 
-        batch_size=batch_size, learning_rate=lr)
+        update_iteration=update_iteration, target_update_freq=target_update_freq,
+        target_update_tau=0.1, batch_size=batch_size, learning_rate=lr)
     writer = SummaryWriter(writer_path)
 
     if not TRAIN:
@@ -149,9 +150,9 @@ def train():
     mean, std = [], []
     live_time = []
 
-    while policy.warm_up():
-        sample(env, policy, max_step, warm_up=True)
-        print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
+    # while policy.warm_up():
+    #     sample(env, policy, max_step, warm_up=True)
+    #     print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
 
     for i_eps in range(episodes):
         rewards = sample(env, policy, max_step)

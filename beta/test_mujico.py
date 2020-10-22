@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from collections import namedtuple
 import numpy as np
 import sys
-sys.path.append('//home//lintao//drl_repo//DRL_beta')
+sys.path.append('..')
 
 from drl.algorithm import SACV as SAC
 from utils.plot import plot
@@ -24,8 +24,8 @@ mujuco_env = ['Ant-v2', 'HalfCheetah-v2', 'Hopper-v2', 'Humanoid-v2']
 #config
 config = config['sacv']
 
-env_name = config['env_name']
-
+# env_name = config['env_name']
+env_name = mujuco_env[3]
 buffer_size = int(config['buffer_size'])
 actor_learn_freq = config['actor_learn_freq']
 update_iteration = config['update_iteration']
@@ -34,7 +34,7 @@ batch_size = int(config['batch_size'])
 hidden_dim = config['hidden_dim']
 episodes = config['episodes'] + 10
 # max_step = config['max_step']
-max_step = 10000
+max_step = 1000
 lr = config['lr']        
 tau = config['tau']
 
@@ -61,12 +61,12 @@ model_save_dir = file_path + SAVE_DIR
 save_file = model_save_dir.split('/')[-1]
 writer_path = model_save_dir + LOG_DIR
 
-try:
-    os.makedirs(model_save_dir)
-except FileExistsError:
-    import shutil
-    shutil.rmtree(model_save_dir)
-    os.makedirs(model_save_dir)
+# try:
+#     os.makedirs(model_save_dir)
+# except FileExistsError:
+#     import shutil
+#     shutil.rmtree(model_save_dir)
+#     os.makedirs(model_save_dir)
 
 env = gym.make(env_name)
 env = env.unwrapped
@@ -81,7 +81,7 @@ action_bias = (env.action_space.high + env.action_space.low) / 2
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-#region
+#region Network
 def layer_norm(layer, std=1.0, bias_const=1e-6):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -109,7 +109,7 @@ class ActorModel(nn.Module):
     def action(self, state, test=False):
         mean, log_std = self.forward(state)
         if test:
-            return mean.detach().cpu().numpy()
+            return torch.tanh(mean).detach().cpu().numpy()
         std = log_std.exp()
         normal = Normal(mean, std)
         
@@ -130,49 +130,8 @@ class ActorModel(nn.Module):
         
         return action, log_prob
 
-class CriticModel(nn.Module):
-    def __init__(self, state_dim, hidden_dim, action_dim):
-        super().__init__()
-        self.net1 = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
-                                 nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-                                 nn.Linear(hidden_dim, 1), )
-        self.net2 = nn.Sequential(nn.Linear(state_dim + action_dim , hidden_dim), nn.ReLU(),
-                                 nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-                                 nn.Linear(hidden_dim, 1), )
-
-    def forward(self, state, action):
-        x = torch.cat((state, action), dim=1)
-        q1_value = self.net1(x)
-        q2_value = self.net2(x)
-        return q1_value, q2_value
-
-# class CriticModel(nn.Module):
-#     def __init__(self, state_dim, hidden_dim, action_dim):
-#         super().__init__()
-#         self.net1 = self.build_net(state_dim, hidden_dim, action_dim)
-#         self.net2 = self.build_net(state_dim, hidden_dim, action_dim)
-    
-#     def build_net(self, state_dim, hidden_dim, action_dim):
-#         self.fc1 = nn.Linear(state_dim + action_dim, hidden_dim)
-#         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-#         self.q_value = nn.Linear(hidden_dim, 1)
-#         layer_norm(self.fc1, std=1.0)
-#         layer_norm(self.fc2, std=1.0)
-#         layer_norm(self.q_value, std=1.0)
-#         self.net = nn.Sequential(self.fc1, nn.ReLU(),
-#                                  self.fc2, nn.ReLU(),
-#                                  self.q_value, )
-#         return self.net
-
-#     def forward(self, state, action):
-#         x = torch.cat((state, action), dim=1)
-#         q1 = self.net1(x)
-#         q2 = self.net2(x)
-#         return q1, q2
-
-
 class CriticModelDist(nn.Module):
-    def __init__(self, obs_dim, act_dim, mid_dim, use_dist=False, v_min=-10, v_max=0, num_atoms=51):
+    def __init__(self, obs_dim, mid_dim, act_dim, use_dist=False, v_min=-10, v_max=0, num_atoms=51):
         super().__init__()
         self.use_dist = use_dist
         if use_dist:
@@ -182,15 +141,8 @@ class CriticModelDist(nn.Module):
             self.net1 = self.build_network(obs_dim, mid_dim, act_dim, num_atoms)
             self.net2 = self.build_network(obs_dim, mid_dim, act_dim, num_atoms)
         else:
-            self.net1 = self.build_network(obs_dim, mid_dim, act_dim, 1)
-            self.net2 = self.build_network(obs_dim, mid_dim, act_dim, 1)
-
-            # self.net1 = nn.Sequential(nn.Linear(obs_dim + act_dim , mid_dim), nn.ReLU(),
-            #                         nn.Linear(mid_dim, mid_dim), nn.ReLU(),
-            #                         nn.Linear(mid_dim, num_atoms), )
-            # self.net2 = nn.Sequential(nn.Linear(obs_dim + act_dim , mid_dim), nn.ReLU(),
-            #                         nn.Linear(mid_dim, mid_dim), nn.ReLU(),
-            #                         nn.Linear(mid_dim, num_atoms), )
+            self.net1 = self.build_network(obs_dim, mid_dim, act_dim)
+            self.net2 = self.build_network(obs_dim, mid_dim, act_dim)
 
            
         # self.fc1 = nn.Linear(obs_dim + act_dim, mid_dim)
@@ -200,10 +152,10 @@ class CriticModelDist(nn.Module):
         # self.fc3.weight.data.uniform_(-init_w, init_w)
         # self.fc3.bias.data.uniform_(-init_w, init_w)
 
-    def build_network(self, obs_dim, act_dim, mid_dim, out_dim):
+    def build_network(self, obs_dim, mid_dim, act_dim, num_atoms=1):
         self.net = nn.Sequential(nn.Linear(obs_dim + act_dim , mid_dim), nn.ReLU(),
                                  nn.Linear(mid_dim, mid_dim), nn.ReLU(),
-                                 nn.Linear(mid_dim, out_dim), )
+                                 nn.Linear(mid_dim, act_dim * num_atoms), )
         return self.net
 
     def forward(self, obs, act):
@@ -235,30 +187,35 @@ def sample(env, policy, max_step, warm_up=False):
     rewards = []
     state = env.reset()
     cnt = 0
+    pg_loss, q_loss, a_loss = 0, 0, 0
+    max_step = 10000 if not TRAIN else max_step
     for step in range(max_step):
     # while True:
         cnt += 1
         #==============choose_action==============
-        action = policy.choose_action(state) if not warm_up else env.action_space.sample()
+        if TRAIN:
+            action = policy.choose_action(state) if not warm_up else env.action_space.sample()
         # print ('get action')
+        else:
+            action = policy.choose_action(state, test=True)
         next_state, reward, done, info = env.step(map_action(action))
         if TRAIN:
             mask = 0 if done else 1
             #==============process==============
             policy.process(s=state, a=action, r=reward, m=mask, s_=next_state)
-            # print ('process')
+            if len(policy.buffer) > int(1e4):
+                pg_loss, q_loss, a_loss = policy.learn()
         else:
-            # pass
             env.render()
-        # env.render()
-        # print(f'cnt {cnt}')
+            pass
+    
         rewards.append(reward)
         if done:
             break
-        if warm_up and len(policy.buffer) > int(1e4):
-            break
+        # if warm_up and len(policy.buffer) > int(1e4):
+        #     break
         state = next_state
-    return rewards
+    return rewards, pg_loss, q_loss, a_loss
 
 def train():
     model = namedtuple('model', ['policy_net', 'value_net'])
@@ -266,22 +223,22 @@ def train():
     # critic = CriticModel(state_space, hidden_dim, action_space)
     critic = CriticModelDist(state_space, hidden_dim, action_space, use_dist=False)
     rl_agent = model(actor, critic)
-    policy = SAC(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq, action_dim=action_space,
+    policy = SAC(rl_agent, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq, act_dim=action_space,
             update_iteration=update_iteration, target_update_freq=target_update_freq, 
             target_update_tau=tau, batch_size=batch_size, learning_rate=lr, use_priority=use_priority)
     writer = SummaryWriter(writer_path)
 
-    if not TRAIN:
-        policy.load_model(model_save_dir, save_file, load_actor=True)
     live_time = []
     mean, std = [], []
-
+    if not TRAIN:
+        policy.load_model(model_save_dir, save_file, load_actor=True)
+    # else:
     while policy.warm_up(int(1e4)):
         sample(env, policy, max_step, warm_up=True)
         print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
 
     for i_eps in range(episodes):
-        rewards = sample(env, policy, max_step)
+        rewards, pg_loss, q_loss, a_loss = sample(env, policy, max_step)
         reward_mean = np.mean(rewards)
         reward_std = np.std(rewards)
         reward_sum = np.sum(rewards)
@@ -292,7 +249,7 @@ def train():
             print (f'EPS:{i_eps + 1}, reward:{reward_mean:.3f}')
         else:
             #==============learn==============
-            pg_loss, q_loss, a_loss = policy.learn()
+            # pg_loss, q_loss, a_loss = policy.learn()
             if PLOT:
                 live_time.append(reward_sum)
                 plot(live_time, POLT_NAME, model_save_dir, 100)
@@ -311,7 +268,7 @@ def train():
     return mean, std
 
 if __name__ == '__main__':
-    TRAIN = True
+    TRAIN = False
     env.seed(1)
     torch.manual_seed(1)
     #only for logistic test 
