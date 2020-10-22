@@ -21,6 +21,7 @@ def _l2_project(next_distr_v, rewards_v, dones_mask_t, gamma, n_atoms, v_min, v_
     batch_size = len(rewards)
     proj_distr = np.zeros((batch_size, n_atoms), dtype=np.float32)
     delta_z = (v_max - v_min) / (n_atoms - 1)
+    rewards = np.squeeze(rewards, axis=1)
 
     for atom in range(n_atoms):
         tz_j = np.minimum(v_max, np.maximum(v_min, rewards + (v_min + atom * delta_z) * gamma))
@@ -28,6 +29,8 @@ def _l2_project(next_distr_v, rewards_v, dones_mask_t, gamma, n_atoms, v_min, v_
         l = np.floor(b_j).astype(np.int64)
         u = np.ceil(b_j).astype(np.int64)
         eq_mask = u == l
+        # print (eq_mask.shape, l.shape)
+        # print (eq_mask)
         proj_distr[eq_mask, l[eq_mask]] += next_distr[eq_mask, atom]
         ne_mask = u != l
         proj_distr[ne_mask, l[ne_mask]] += next_distr[ne_mask, atom] * (u - b_j)[ne_mask]
@@ -50,8 +53,8 @@ def _l2_project(next_distr_v, rewards_v, dones_mask_t, gamma, n_atoms, v_min, v_
         if ne_dones.any():
             proj_distr[ne_dones, l[ne_mask]] = (u - b_j)[ne_mask]
             proj_distr[ne_dones, u[ne_mask]] = (b_j - l)[ne_mask]
-
     return proj_distr
+
 
 class SACV(BasePolicy):
     def __init__(
@@ -67,7 +70,7 @@ class SACV(BasePolicy):
         update_iteration=10,
         verbose=False,
         use_priority=False,
-        use_dist=False
+        act_dim=None,
         ):
         super().__init__()
         self.lr = learning_rate
@@ -87,7 +90,7 @@ class SACV(BasePolicy):
         self._batch_size = batch_size
 
         self.use_priority = use_priority
-        self.use_dist = use_dist
+        self.use_dist = model.value_net.use_dist
 
         if self.use_priority:
             self.buffer = PriorityReplayBuffer(buffer_size)
@@ -95,10 +98,14 @@ class SACV(BasePolicy):
             self.buffer = ReplayBuffer(buffer_size) # off-policy
 
         if self.use_dist:
-            assert isinstance(model.value_net, CriticModelDist)
+            assert model.value_net.num_atoms > 1
+            # assert isinstance(model.value_net, CriticModelDist)
             self.v_min = model.value_net.v_min
             self.v_max = model.value_net.v_max
             self.num_atoms = model.value_net.num_atoms
+            self.delta_z = (self.v_max - self.v_min) / (self.num_atoms - 1)
+            self.support = torch.linspace(self.v_min, self.v_max, self.num_atoms)
+
 
         self.actor_eval = model.policy_net.to(device).train()
         self.critic_eval = model.value_net.to(device).train()
@@ -110,6 +117,7 @@ class SACV(BasePolicy):
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
 
         self.criterion = nn.SmoothL1Loss(reduction='none') # keep batch dim
+        self.act_dim = act_dim
 
         self.target_entropy = -torch.tensor(1).to(device)
         self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
@@ -126,28 +134,33 @@ class SACV(BasePolicy):
             data = data.to(device)
         return data
 
-    def learn_dist(self, obs, act, rew, next_obs, done):
+    def learn_dist(self, obs, act, rew, next_obs, mask):
         with torch.no_grad():
             next_act, next_log_pi = self.actor_target(next_obs)
             # q(s, a) change to z(s, a) to discribe a distributional
             z1_next, z2_next = self.critic_target.get_probs(next_obs, next_act) # [batch_size, num_atoms]
-           
-            z_next = torch.stack([torch.where(z1.sum() < z2.sum(), z1, z2) for z1, z2 in zip(z1_next, z2_next)])
-            z_next -= (self.alpha * next_log_pi)
-            z_projected = _l2_project(next_distr_v=z_next,
-                                         rewards_v=rew,
-                                         dones_mask_t=done,
-                                         gamma=self._gamma,
-                                         n_atoms=self.num_atoms,
-                                         v_min=self.v_min,
-                                         v_max=self.v_max,
-                                         )
-            z_target = torch.from_numpy(z_projected).float().to(device)
+            p_next = torch.stack([torch.where(z1.sum() < z2.sum(), z1, z2) for z1, z2 in zip(z1_next, z2_next)])
+            p_next -= (self.alpha * next_log_pi)
+            Tz = rew.unsqueeze(1) + mask * self.support.unsqueeze(0)
+            Tz = Tz.clamp(min=self.v_min, max=self.v_max)
 
-        z1_eval, z2_eval = self.critic_eval(obs, act)
-        self.criterion = nn.BCELoss(reduction='none')
-        loss1 = self.criterion(z1_eval, z_target)
-        loss2 = self.criterion(z2_eval, z_target)
+            b = (Tz - self.v_min) / self.delta_z
+            l, u = b.floor().to(torch.int64), b.ceil().to(torch.int64)
+            l[(u > 0) * (l == u)] -= 1
+            u[(l < (self.num_atoms - 1)) * (l == u)] += 1
+
+            m = obs.new_zeros(self._batch_size, self.num_atoms).cpu()
+            p_next = p_next.cpu()
+            # print (f'm device: {m.device}')
+            # print (f'p_next device: {p_next.device}')
+            offset = torch.linspace(0, ((self._batch_size - 1) * self.num_atoms), self._batch_size).unsqueeze(1).expand(self._batch_size, self.num_atoms).to(l)
+            m.view(-1).index_add_(0, (l + offset).view(-1), (p_next * (u.float() - b)).view(-1))  # m_l = m_l + p(s_t+n, a*)(u - b)
+            m.view(-1).index_add_(0, (u + offset).view(-1), (p_next * (b - l.float())).view(-1))  # m_u = m_u + p(s_t+n, a*)(b - l)
+
+        m = m.to(device)
+        log_z1, log_z2 = self.critic_eval.get_probs(obs, act, log=True)
+        loss1 = -(m * log_z1).sum(dim=1)
+        loss2 = -(m * log_z2).sum(dim=1)
         batch_loss = 0.5 * (loss1 + loss2)
         return batch_loss
 
@@ -162,16 +175,31 @@ class SACV(BasePolicy):
                 batch_split = self.buffer.split_batch(self._batch_size)
                 S, A, M, R, S_ = batch_split['s'], batch_split['a'], batch_split['m'], batch_split['r'],  batch_split['s_']
             # print ('after sampling from buffer!')
+            if self.act_dim is None:
+                self.act_dim = A.shape[-1]
+                self.target_entropy = -torch.tensor(self.act_dim).to(device)
+                print(self.target_entropy)
+                assert 0
+
             R = torch.tensor(R, dtype=torch.float32).view(-1, 1)
             S = torch.tensor(S, dtype=torch.float32, device=device)
-            A = torch.tensor(A, dtype=torch.float32, device=device).view(-1, 1)
+            # A = torch.tensor(A, dtype=torch.float32, device=device).view(-1, 1)
+            A = torch.tensor(A, dtype=torch.float32, device=device).view(-1, self.act_dim)
+            # print (f'A shape {A.shape}')
             M = torch.tensor(M, dtype=torch.float32).view(-1, 1)
             S_ = torch.tensor(S_, dtype=torch.float32, device=device)
             
-            # print (f'size S:{S.size()}, A:{A.size()}, M:{M.size()}, R:{R.size()}, S_:{S_.size()}, W:{W.size()}')
+            # print (f'size S:{S.size()}, A:{A.size()}, M:{M.size()}, R:{R.size()}, S_:{S_.size()}')
             if self.use_dist:
-                D = torch.stack([torch.where(mask > 0, 0, 1) for mask in M]).view(-1, 1)
-                batch_loss = self.learn_dist(S, A, R, S_, D)
+                # print (M[0].size())
+                # print (M[0])
+                # print (M[0].item())
+                # assert 0
+                # D = torch.from_numpy(np.array([1^int(mask.item()) for mask in M])).view(-1, 1)
+                # print (f'size S:{S.shape}, A:{A.size()}, M:{M.size()}, R:{R.size()}, S_:{S_.size()}, D:{D.size()}')
+                # assert 0
+                batch_loss = self.learn_dist(S, A, R, S_, M)
+
             else:
                 with torch.no_grad():
                     next_A, next_log = self.actor_target.evaluate(S_)
@@ -179,11 +207,11 @@ class SACV(BasePolicy):
                     q_next = torch.min(q1_next, q2_next) - self.alpha * next_log
                     q_target = R + M * self._gamma * q_next.cpu()
                     q_target = q_target.to(device)
-                
                 # q_loss
                 q1_eval, q2_eval = self.critic_eval(S, A)
                 loss1 = self.criterion(q1_eval, q_target)
                 loss2 = self.criterion(q2_eval, q_target)
+                # print(f'q_eval {q1_eval.shape}, q_target {q_target.shape}')
                 batch_loss = 0.5 * (loss1 + loss2)
 
             if self.use_priority:
@@ -203,12 +231,12 @@ class SACV(BasePolicy):
                 curr_A, curr_log = self.actor_eval.evaluate(S)
                 if self.use_dist:
                     z1_next, z2_next = self.critic_eval.get_probs(S, curr_A)
-                    z_next = torch.stack([torch.where(z1.sum() < z2.sum(), z1, z2) for z1, z2 in zip(z1_next, z2_next)])
+                    p_next = torch.stack([torch.where(z1.sum() < z2.sum(), z1, z2) for z1, z2 in zip(z1_next, z2_next)])
                     num_atoms = torch.tensor(self.num_atoms, dtype=torch.float32, device=device)
-                    # actor_loss = z_next * num_atoms
+                    # actor_loss = p_next * num_atoms
                     # actor_loss = torch.sum(actor_loss, dim=1)
                     # actor_loss = -(actor_loss + self.alpha * curr_log).mean()
-                    actor_loss = (self.alpha * curr_log - z_next) * num_atoms
+                    actor_loss = (self.alpha * curr_log - p_next)
                     actor_loss = torch.sum(actor_loss, dim=1)
                     actor_loss = actor_loss.mean()
                 else:

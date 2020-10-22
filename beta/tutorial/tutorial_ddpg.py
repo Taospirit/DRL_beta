@@ -10,37 +10,33 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributions import Categorical
 from collections import namedtuple
+import sys
+sys.path.append('../..')
+# sys.path.appedn('..')
 
 from drl.algorithm import DDPG
-from utils.plot import plot
-from utils.config import config
+from drl.utils import plot
+from tqdm import tqdm
 
-# config
-config = config['ddpg']
-env_name = config['env_name']
-buffer_size = config['buffer_size']
-actor_learn_freq = config['actor_learn_freq']
-target_update_freq = config['target_update_freq']
-batch_size = config['batch_size']
-hidden_dim = config['hidden_dim']
-episodes = config['episodes'] + 10
-max_step = config['max_step']
-lr = config['lr']
+env_name = 'Pendulum-v0'
+buffer_size = 10000
+actor_learn_freq = 1
+target_update_freq = 10
+target_update_tau = 0.1
+batch_size = 128
+hidden_dim = 128
+episodes = 1000
+max_step = 300
+lr = 3e-3
 
-POLT_NAME = config['POLT_NAME'] + env_name
-SAVE_DIR = config['SAVE_DIR'] + env_name
-LOG_DIR = config['LOG_DIR']
+POLT_NAME = 'DDPG_' + env_name
+SAVE_DIR = '/save/ddpg_' + env_name
+# LOG_DIR = '/logs'
 
 model_save_dir = abspath(dirname(__file__)) + SAVE_DIR
 save_file = model_save_dir.split('/')[-1]
-writer_path = model_save_dir + LOG_DIR
+# writer_path = model_save_dir + LOG_DIR
 
-try:
-    os.makedirs(model_save_dir)
-except FileExistsError:
-    import shutil
-    shutil.rmtree(model_save_dir)
-    os.makedirs(model_save_dir)
 
 env = gym.make(env_name)
 env = env.unwrapped
@@ -72,7 +68,7 @@ class ActorModel(nn.Module):
             noise_norm = torch.ones_like(action).data.normal_(0, noise_std).to(self.device)
             action += noise_norm.clamp(-noise_clip, noise_clip)
         action = action.clamp(-action_max, action_max)
-        return action
+        return action.detach().cpu().numpy()
 
 class CriticModel(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
@@ -92,30 +88,31 @@ actor = ActorModel(state_space, hidden_dim, action_space)
 critic = CriticModel(state_space, hidden_dim, action_space)
 model = model(actor, critic)
 policy = DDPG(model, buffer_size=buffer_size, actor_learn_freq=actor_learn_freq,
-        target_update_freq=target_update_freq, batch_size=batch_size, learning_rate=lr)
-writer = SummaryWriter(writer_path)
+        target_update_freq=target_update_freq, target_update_tau=target_update_tau, 
+        batch_size=batch_size, learning_rate=lr, num_episodes=episodes)
+# writer = SummaryWriter(writer_path)
 
 TRAIN = True
 PLOT = True
-WRITER = False
+# WRITER = False
 
 def map_action(action):
     if isinstance(action, torch.Tensor):
         action = action.item()
     return action * action_scale + action_bias
 
-def sample(env, policy, max_step):
+def sample(env, policy, max_step, train=True, render=False):
     reward_avg = 0
     state = env.reset()
     for step in range(max_step):
         #==============choose_action==============
         action = policy.choose_action(state)
         next_state, reward, done, info = env.step(map_action(action))
-        if TRAIN:
+        if train:
             mask = 0 if done else 1
             #==============process==============
             policy.process(s=state, a=action, r=reward, m=mask, s_=next_state)
-        else:
+        if render:
             env.render()
         reward_avg += reward
         if done:
@@ -124,35 +121,44 @@ def sample(env, policy, max_step):
     reward_avg /= (step + 1)
     return reward_avg
 
-def main():
-    if not TRAIN:
-        policy.load_model(model_save_dir, save_file, load_actor=True)
-    live_time = []
-
-    # while policy.warm_up():
-    #     sample(env, policy, max_step)
-    #     print (f'Warm up for buffer {policy.buffer.size()}', end='\r')
-
-    for i_eps in range(episodes):
-        reward_avg = sample(env, policy, max_step)
-        if not TRAIN:
-            print (f'EPS:{i_eps + 1}, reward:{round(reward_avg, 3)}')
-        else:
-            #==============learn==============
-            pg_loss, v_loss = policy.learn()
-            if PLOT:
-                live_time.append(reward_avg)
-                plot(live_time, 'DDPG_'+env_name, model_save_dir, 100)
-            if WRITER:
-                writer.add_scalar('reward', reward_avg, global_step=i_eps)
-                writer.add_scalar('loss/pg_loss', pg_loss, global_step=i_eps)
-                writer.add_scalar('loss/v_loss', v_loss, global_step=i_eps)
-            if i_eps % 5 == 0:
-                print (f'EPS:{i_eps}, reward_avg:{round(reward_avg, 3)}, pg_loss:{round(pg_loss, 3)}, v_loss:{round(v_loss, 3)}')
-            if i_eps % 200 == 0:
-                policy.save_model(model_save_dir, save_file, save_actor=True, save_critic=True)
-    writer.close()
+def eval():
+    policy.load_model(model_save_dir, save_file, load_actor=True)
+    for i_eps in range(100):
+        reward_avg = sample(env, policy, max_step, train=False, render=True)
+        print (f'EPS:{i_eps + 1}, reward:{round(reward_avg, 3)}')
     env.close()
 
+def train():
+    try:
+        os.makedirs(model_save_dir)
+    except FileExistsError:
+        import shutil
+        shutil.rmtree(model_save_dir)
+        os.makedirs(model_save_dir)
+    live_time = []
+
+    while policy.warm_up(int(1e3)):
+        sample(env, policy, max_step)
+        print (f'Warm up for buffer {len(policy.buffer)}', end='\r')
+
+    for i_eps in tqdm(range(episodes)):
+        reward_avg = sample(env, policy, max_step, render=False)
+        #==============learn==============
+        pg_loss, v_loss = policy.learn()
+        if PLOT:
+            live_time.append(reward_avg)
+            plot(live_time, 'DDPG_'+env_name, model_save_dir, 100)
+        # if WRITER:
+        #     writer.add_scalar('reward', reward_avg, global_step=i_eps)
+        #     writer.add_scalar('loss/pg_loss', pg_loss, global_step=i_eps)
+        #     writer.add_scalar('loss/v_loss', v_loss, global_step=i_eps)
+        if i_eps % 50 == 0:
+            # pass
+            print (f'EPS:{i_eps}, reward_avg:{round(reward_avg, 3)}, pg_loss:{round(pg_loss, 3)}, v_loss:{round(v_loss, 3)}', end='\r')
+        if i_eps % 200 == 0:
+            policy.save_model(model_save_dir, save_file, save_actor=True, save_critic=True)
+    # writer.close()
+
 if __name__ == '__main__':
-    main()
+    train()
+    eval()

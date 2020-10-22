@@ -19,33 +19,29 @@ class PPO(BasePolicy):  # option: double
         model,
         buffer_size=1000,
         actor_learn_freq=1,
-        target_update_freq=0,
-        target_update_tau=1e-2,
-        learning_rate=0.0001,
+        learning_rate=1e-4,
         discount_factor=0.99,
-        gae_lamda=0.95,
+        ratio_clip=0.2,
+        lam_entropy=0.01,
+        gae_lamda=0.995,  # td
         batch_size=100,
-        verbose=False
+        verbose=False,
+        act_dim=None,
     ):
         super().__init__()
         self.lr = learning_rate
         self.eps = np.finfo(np.float32).eps.item()
-        self.tau = target_update_tau
-        self.ratio_clip = 0.2
-        self.lam_entropy = 0.01
+        self.ratio_clip = ratio_clip
+        self.lam_entropy = lam_entropy
         self.adv_norm = False  # normalize advantage, defalut=False
         self.rew_norm = False  # normalize reward, default=False
         self.schedule_clip = False
         self.schedule_adam = False
 
         self.actor_learn_freq = actor_learn_freq
-        self.target_update_freq = target_update_freq
         self._gamma = discount_factor
         self._gae_lam = gae_lamda
-        self._target = target_update_freq > 0
         self._update_iteration = 10
-        self._sync_cnt = 0
-        # self._learn_cnt = 0
         self._learn_critic_cnt = 0
         self._learn_actor_cnt = 0
 
@@ -59,71 +55,37 @@ class PPO(BasePolicy):  # option: double
         self.actor_eval_optim = optim.Adam(self.actor_eval.parameters(), lr=self.lr)
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
 
-        # self.actor_eval.train()
-        # self.critic_eval.train()
-
-        if self._target:
-            self.actor_target = self.copy_net(self.actor_eval)
-            self.critic_target = self.copy_net(self.critic_eval)
-
         self.criterion = nn.SmoothL1Loss()
-
-    # def choose_action(self, state, test=False):
-    #     state = torch.tensor(state, dtype=torch.float32, device=device)
-    #     # if test:
-    #     #     self.actor_eval.eval()
-    #     # with torch.no_grad():
-    #     #     mu, sigma = self.actor_eval(state)
-    #     # dist = Normal(mu, sigma)
-    #     # action = dist.sample()
-    #     # # print (f'mu:{mu}, sigma:{sigma}, dist: {dist}, action sample before clamp: {action}')
-    #     # action = action.clamp(-2, 2)
-    #     # # print (f'action after clamp {action}')
-    #     # log_prob = dist.log_prob(action)
-    #     # assert abs(action.item()) <= 2, f'ERROR: action out of {action}'
-    #     # return action.item(), log_prob.item()
-    #     return self.actor_eval.action(state)
-
-    # # not use
-    # def get_batchs_indices(self, buffer_size, batch_size, replace=True, batch_num=None):
-    #     indices = [i for i in range(buffer_size)]
-    #     if replace: # 有放回的采样
-    #         if not batch_num:
-    #             batch_num = round(buffer_size / batch_size + 0.5) * 2
-    #         return [np.random.choice(indices, batch_size, replace=False) for _ in range(batch_num)]
-    #     else:# 无放回的采样
-    #         np.random.shuffle(indices)
-    #         return [indices[i: i + batch_size] for i in range(0, buffer_size, batch_size)]
+        self.act_dim = act_dim
 
     def learn(self, i_episode=0, num_episode=100):
         if not self.buffer.is_full():
             print(f'Waiting for a full buffer: {len(self.buffer)}\{self.buffer.capacity()} ', end='\r')
             return 0, 0
 
-        loss_actor_avg = 0
-        loss_critic_avg = 0
+        loss_actor_avg, loss_critic_avg = 0, 0
 
-        memory_split = self.buffer.split(self.buffer.all_memory())
-        S = torch.tensor(memory_split['s'], dtype=torch.float32, device=device)
-        A = torch.tensor(memory_split['a'], dtype=torch.float32, device=device).view(-1, 1)
-        S_ = torch.tensor(memory_split['s_'], dtype=torch.float32, device=device)
-        R = torch.tensor(memory_split['r'], dtype=torch.float32).view(-1, 1)
-        Log = torch.tensor(memory_split['l'], dtype=torch.float32, device=device).view(-1, 1)
+        mem = self.buffer.split(self.buffer.all_memory())
+        if self.act_dim is None:
+            self.act_dim = mem['a'].shape[-1]
+        S = torch.tensor(mem['s'], dtype=torch.float32, device=device)
+        A = torch.tensor(mem['a'], dtype=torch.float32, device=device).view(-1, self.act_dim)
+        S_ = torch.tensor(mem['s_'], dtype=torch.float32, device=device)
+        R = torch.tensor(mem['r'], dtype=torch.float32).view(-1, 1)
+        Log = torch.tensor(mem['l'], dtype=torch.float32, device=device).view(-1, 1)
+        if self._verbose:
+            print(f'Shape S:{S.shape}, A:{A.shape}, R:{R.shape}, S_:{S_.shape}, Log:{Log.shape}')
 
-        # print (f'Size S {S.size()}, A {A.size()}, S_ {S_.size()}, R {R.size()}, Log {Log.size()}')
-        # print (f'S {S}, A {A}, S_ {S_}, R {R}, Log {Log}')
         with torch.no_grad():
             v_evals = self.critic_eval(S).cpu().numpy()
             end_v_eval = self.critic_eval(S_[-1]).cpu().numpy()
 
         rewards = self._normalized(R, self.eps).numpy() if self.rew_norm else R.numpy()
-        # rewards = rewards.cpu().numpy()
-        adv_gae_td = self.GAE(rewards, v_evals, next_v_eval=end_v_eval,
-                              gamma=self._gamma, lam=self._gae_lam)  # td_error adv
-        advantage = torch.from_numpy(adv_gae_td).to(device).unsqueeze(-1)
+        adv_gae = self.GAE(rewards, v_evals, next_v_eval=end_v_eval,
+                              gamma=self._gamma, lam=self._gae_lam)
+        advantage = torch.from_numpy(adv_gae).to(device).unsqueeze(-1)
         advantage = self._normalized(advantage, 1e-10) if self.adv_norm else advantage
 
-        # indices = [i for i in range(len(self.buffer))]
         for _ in range(self._update_iteration):
             v_eval = self.critic_eval(S)
             v_target = advantage + v_eval.detach()
@@ -135,6 +97,8 @@ class PPO(BasePolicy):  # option: double
             critic_loss.backward()
             self.critic_eval_optim.step()
             self._learn_critic_cnt += 1
+            if self._verbose:
+                print(f'=======Learn_Critic_Net, cnt{self._learn_critic_cnt}=======')
 
             if self._learn_critic_cnt % self.actor_learn_freq == 0:
                 # actor_core
@@ -147,9 +111,9 @@ class PPO(BasePolicy):  # option: double
                 surrogate_loss = -torch.min(pg_ratio * advantage, clipped_pg_ratio * advantage).mean()
 
                 # policy entropy
-                loss_entropy = -torch.mean(torch.exp(new_log_prob) * new_log_prob)
+                entropy_loss = -torch.mean(torch.exp(new_log_prob) * new_log_prob)
 
-                actor_loss = surrogate_loss - self.lam_entropy * loss_entropy
+                actor_loss = surrogate_loss - self.lam_entropy * entropy_loss
 
                 loss_actor_avg += actor_loss.item()
 
@@ -158,14 +122,7 @@ class PPO(BasePolicy):  # option: double
                 self.actor_eval_optim.step()
                 self._learn_actor_cnt += 1
                 if self._verbose:
-                    print(f'=======Learn_Actort_Net=======')
-
-            if self._target:
-                if self._learn_critic_cnt % self.target_update_freq == 0:
-                    if self._verbose:
-                        print(f'=======Soft_sync_weight of DDPG=======')
-                    self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
-                    self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
+                    print(f'=======Learn_Actort_Net, cnt{self._learn_actor_cnt}=======')
 
         self.buffer.clear()
         assert self.buffer.is_empty()
@@ -184,7 +141,6 @@ class PPO(BasePolicy):  # option: double
             for g in self.critic_eval_optim.param_groups:
                 g['lr'] = new_lr
 
-        print(f'critic_cnt {self._learn_critic_cnt}, actor_cnt {self._learn_actor_cnt}')
         loss_actor_avg /= (self._update_iteration/self.actor_learn_freq)
         loss_critic_avg /= self._update_iteration
 

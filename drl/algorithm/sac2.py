@@ -26,6 +26,7 @@ class SAC2(BasePolicy): # no value network
         discount_factor=0.99,
         verbose=False,
         update_iteration=10,
+        act_dim=None,
         ):
         super().__init__()
         self.lr = learning_rate
@@ -54,7 +55,7 @@ class SAC2(BasePolicy): # no value network
         self.critic_eval_optim = optim.Adam(self.critic_eval.parameters(), lr=self.lr)
 
         self.criterion = nn.SmoothL1Loss()
-
+        self.act_dim = act_dim
         self.target_entropy = -torch.tensor(1).to(device)
         self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
         self.alpha_optim = optim.Adam([self.log_alpha], lr=self.lr)
@@ -63,21 +64,25 @@ class SAC2(BasePolicy): # no value network
     def learn(self):
         pg_loss, q_loss, a_loss = 0, 0, 0
         for _ in range(self._update_iteration):
-            batch_split = self.buffer.split_batch(self._batch_size)
-            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=device)
-            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=device).view(-1, 1)
-            M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
-            R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
-            S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=device)
+            batch = self.buffer.split_batch(self._batch_size)
+            if self.act_dim is None:
+                self.act_dim = batch['a'].shape[-1]
+                self.target_entropy = -torch.tensor(self.act_dim).to(device)
 
-            # print (f'size S:{S.size()}, A:{A.size()}, M:{M.size()}, R:{R.size()}, S_:{S_.size()}, W:{W.size()}')
+            S = torch.tensor(batch['s'], dtype=torch.float32, device=device)
+            A = torch.tensor(batch['a'], dtype=torch.float32, device=device).view(-1, self.act_dim)
+            M = torch.tensor(batch['m'], dtype=torch.float32).view(-1, 1)
+            R = torch.tensor(batch['r'], dtype=torch.float32).view(-1, 1)
+            S_ = torch.tensor(batch['s_'], dtype=torch.float32, device=device)
+            if self._verbose:
+                print(f'shape S:{S.size()}, A:{A.size()}, M:{M.size()}, R:{R.size()}, S_:{S_.size()}, W:{W.size()}')
+
             with torch.no_grad():
                 next_A, next_log = self.actor_target.evaluate(S_)
                 q1_next, q2_next = self.critic_target(S_, next_A)
                 q_next = torch.min(q1_next, q2_next) - self.alpha * next_log
                 q_target = R + M * self._gamma * q_next.cpu()
                 q_target = q_target.to(device)
-            
             # q_loss
             q1_eval, q2_eval = self.critic_eval(S, A)
             critic_loss = self.criterion(q1_eval, q_target) + self.criterion(q2_eval, q_target)
@@ -107,12 +112,12 @@ class SAC2(BasePolicy): # no value network
                 self.alpha_optim.step()
                 self.alpha = float(self.log_alpha.exp().detach().cpu().numpy())
 
-            q_loss += critic_loss.item() * 0.5
-            pg_loss += actor_loss.item()
-            a_loss += alpha_loss.item()
-
             if self._learn_critic_cnt % self.target_update_freq:
                 self.soft_sync_weight(self.critic_target, self.critic_eval, self.tau)
                 self.soft_sync_weight(self.actor_target, self.actor_eval, self.tau)
+
+            q_loss += critic_loss.item() * 0.5
+            pg_loss += actor_loss.item()
+            a_loss += alpha_loss.item()
         
         return pg_loss, q_loss, a_loss

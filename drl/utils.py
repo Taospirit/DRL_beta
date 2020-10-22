@@ -1,3 +1,5 @@
+import os
+import matplotlib.pyplot as plt
 import numpy as np
 import random
 import torch
@@ -5,6 +7,25 @@ from collections import namedtuple
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def plot(steps, y_label, model_save_dir, step_interval):
+    ax = plt.subplot(111)
+    ax.cla()
+    ax.grid()
+    ax.set_title(y_label)
+    ax.set_xlabel('Episode')
+    ax.set_ylabel('Run Reward')
+    ax.plot(steps)
+    RunTime = len(steps)
+
+    path = model_save_dir + '/RunTime' + str(RunTime) + '.jpg'
+    if len(steps) % step_interval == 0:
+        plt.savefig(path)
+        print(f'save fig in {path}')
+    plt.pause(0.0000001)
+
+
 class ReplayBuffer(object):
     def __init__(self, size, replay=True):
         self._maxsize = size
@@ -33,9 +54,6 @@ class ReplayBuffer(object):
         self.memory = []
         self.append_index = 0
         # print (f'----------Clear buffer size of {self._maxsize}!----------') 
-
-    def show(self):
-        print (self.memory)
 
     def split(self, batchs):
         split_res = {}
@@ -76,6 +94,9 @@ class SegmentTree():
         self.memory = []
         self.max = 1
         self.cnt = 0
+
+    def __len__(self):
+        return len(self.memory)
 
     def _propagate(self, index, value):
         parent = (index - 1) // 2
@@ -140,12 +161,15 @@ class PriorityReplayBuffer(object):
         super().__init__()
         self.capacity = capacity
         self.discount = 0.99
-        self.n = 3
+        self.n = 1
         self.priority_weight = 0.4
         self.priority_exponent = 0.5
         self.t = 0
         self.StoreTree = SegmentTree(capacity)
         self.blank_trans = Transition(0, None, None, 0, False)
+
+    def __len__(self):
+        return len(self.StoreTree)
 
     def append(self, **kwargs):
         state, action, reward, terminal = kwargs['s'], kwargs['a'], kwargs['r'], not kwargs['m']

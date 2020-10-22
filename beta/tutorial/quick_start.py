@@ -1,5 +1,5 @@
 import gym
-import os
+import os, sys
 import time
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +9,8 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from collections import namedtuple
-
+import sys
+sys.path.append('../..')
 from drl.algorithm import A2C
 
 # env
@@ -56,7 +57,7 @@ model = namedtuple('model', ['policy_net', 'value_net'])
 actor = ActorNet(state_space, 32, action_space)
 critic = CriticV(state_space, 32, 1)
 model = model(actor, critic)
-policy = A2C(model, buffer_size=1000, actor_learn_freq=1, target_update_freq=0)
+policy = A2C(model, buffer_size=1000, learning_rate=1e-2)
 
 def sample(env, policy, max_step):
     # reward_avg = 0

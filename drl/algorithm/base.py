@@ -36,9 +36,11 @@ class BasePolicy(object):
         state = torch.tensor(state, dtype=torch.float32, device=device)
         if test:
             self.actor_eval.eval()
-        return self.actor_eval.action(state)
+        return self.actor_eval.action(state, test)
 
-    def warm_up(self):
+    def warm_up(self, warm_size=0):
+        if warm_size:
+            return len(self.buffer) < warm_size
         return not self.buffer.is_full()
 
     def save_model(self, save_dir, save_file_name, save_actor=False, save_critic=False):

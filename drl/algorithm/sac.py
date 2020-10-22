@@ -26,6 +26,7 @@ class SAC(BasePolicy):
         discount_factor=0.99,
         verbose=False,
         update_iteration=10,
+        act_dim=None,
         ):
         super().__init__()
         self.lr = learning_rate
@@ -55,32 +56,38 @@ class SAC(BasePolicy):
         self.value_eval_optim = optim.Adam(self.value_eval.parameters(), lr=self.lr)
 
         self.criterion = nn.SmoothL1Loss()
+        self.act_dim = act_dim
 
     def learn(self):
         pg_loss, v_loss, q_loss = 0, 0, 0
         for _ in range(self._update_iteration):
-            batch_split = self.buffer.split_batch(self._batch_size)
-            S = torch.tensor(batch_split['s'], dtype=torch.float32, device=device)
-            A = torch.tensor(batch_split['a'], dtype=torch.float32, device=device).view(-1, 1)
-            M = torch.tensor(batch_split['m'], dtype=torch.float32).view(-1, 1)
-            R = torch.tensor(batch_split['r'], dtype=torch.float32).view(-1, 1)
-            S_ = torch.tensor(batch_split['s_'], dtype=torch.float32, device=device)
+            batch = self.buffer.split_batch(self._batch_size)
+            if self.act_dim is None:
+                self.act_dim = np.array(batch['a']).shape[-1]
+
+            S = torch.tensor(batch['s'], dtype=torch.float32, device=device)
+            A = torch.tensor(batch['a'], dtype=torch.float32, device=device).view(-1, self.act_dim)
+            M = torch.tensor(batch['m'], dtype=torch.float32).view(-1, 1)
+            R = torch.tensor(batch['r'], dtype=torch.float32).view(-1, 1)
+            S_ = torch.tensor(batch['s_'], dtype=torch.float32, device=device)
 
             new_A, log_prob = self.actor_eval.evaluate(S)
             
             # V_value loss
-            new_q1_value, new_q2_value = self.critic_eval(S, new_A)
-            next_value = torch.min(new_q1_value, new_q2_value) - log_prob
+            with torch.no_grad():
+                new_q1_value, new_q2_value = self.critic_eval(S, new_A)
+                next_value = torch.min(new_q1_value, new_q2_value) - log_prob
             value = self.value_eval(S)
-            value_loss = self.criterion(value, next_value.detach())
+            value_loss = self.criterion(value, next_value)
 
             # Soft q loss
-            q1_value, q2_value = self.critic_eval(S, A)
-            target_value = self.value_target(S_)
-            target_q_value = R + M * self._gamma * target_value.cpu()
-            target_q_value = target_q_value.to(device)
-            loss1 = self.criterion(q1_value, target_q_value.detach())
-            loss2 = self.criterion(q2_value, target_q_value.detach())
+            with torch.no_grad():
+                q1_value, q2_value = self.critic_eval(S, A)
+                target_value = self.value_target(S_)
+                target_q_value = R + M * self._gamma * target_value.cpu()
+                target_q_value = target_q_value.to(device)
+            loss1 = self.criterion(q1_value, target_q_value)
+            loss2 = self.criterion(q2_value, target_q_value)
             q_value_loss = 0.5 * (loss1 + loss2)
 
             # policy loss
