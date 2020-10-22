@@ -8,9 +8,12 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from collections import namedtuple
+import sys
+sys.path.append('../..')
 
 from drl.algorithm import A2C
-from utils.plot import plot
+from drl.utils import plot
+from tqdm import tqdm
 
 # env
 env_name = 'CartPole-v0'
@@ -26,43 +29,40 @@ action_space = env.action_space.n
 class ActorNet(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.action_linear = nn.Linear(hidden_dim, output_dim)
+        self.net = nn.Sequential(nn.Linear(input_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, output_dim), )
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        action_score = self.action_linear(x)
-        dist = F.softmax(action_score, dim=-1)
+        action_sorce = self.net(x)
+        dist = F.softmax(action_sorce, dim=-1)
         return dist
 
     def action(self, state, test=False):        
         dist = self.forward(state)
         m = Categorical(dist)
-        action = m.sample()
-        log_prob = m.log_prob(action)
+        act = m.sample()
+        log_prob = m.log_prob(act)
 
-        return action.item(), log_prob
+        return act.item(), log_prob
 
 class CriticV(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.value_linear = nn.Linear(hidden_dim, output_dim)
+        self.net = nn.Sequential(nn.Linear(input_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, output_dim), )
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        state_value = self.value_linear(x)
-        return state_value
+        return self.net(x)
 
-episodes = 300
-max_step = 1000
+episodes = 200
+max_step = 300
 hidden_dim = 32
 
 model = namedtuple('model', ['policy_net', 'value_net'])
 actor = ActorNet(state_space, hidden_dim, action_space)
 critic = CriticV(state_space, hidden_dim, 1)
 model = model(actor, critic)
-policy = A2C(model, buffer_size=max_step, actor_learn_freq=1, target_update_freq=0)
+policy = A2C(model, buffer_size=max_step, learning_rate=1e-2, num_episodes=episodes)
 
 model_save_dir = 'save/a2c'
 model_save_dir = os.path.join(os.path.dirname(__file__), model_save_dir)
@@ -107,7 +107,7 @@ def main():
             pg_loss, v_loss = policy.learn()
             if PLOT:
                 live_time.append(rewards)
-                plot(live_time, 'DDPG_'+env_name, model_save_dir)
+                plot(live_time, 'A2C_'+env_name, model_save_dir, 100)
             if WRITER:
                 writer.add_scalar('reward', rewards, global_step=i_eps)
                 writer.add_scalar('loss/pg_loss', pg_loss, global_step=i_eps)
