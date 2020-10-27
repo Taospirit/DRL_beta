@@ -66,7 +66,7 @@ class SAC2(BasePolicy): # no value network
         for _ in range(self._update_iteration):
             batch = self.buffer.split_batch(self._batch_size)
             if self.act_dim is None:
-                self.act_dim = batch['a'].shape[-1]
+                self.act_dim = np.array(batch['a']).shape[-1]
                 self.target_entropy = -torch.tensor(self.act_dim).to(device)
 
             S = torch.tensor(batch['s'], dtype=torch.float32, device=device)
