@@ -17,10 +17,6 @@ class BasePolicy(object):
         self.buffer = None
     
     # @abstractmethod
-    def choose_action(self, state, **kwargs):
-        raise NotImplementedError
-
-    # @abstractmethod
     def learn(self):
         raise NotImplementedError
 

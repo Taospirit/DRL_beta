@@ -7,6 +7,7 @@ from drl.algorithm.td3 import TD3
 from drl.algorithm.sac import SAC
 from drl.algorithm.sac2 import SAC2
 from drl.algorithm.sacv import SACV
+from drl.algorithm.oac import OAC
 
 __all__ = [
     'BasePolicy',
@@ -18,5 +19,6 @@ __all__ = [
     'PPO',
     'SAC',
     'SAC2',
-    'SACV'
+    'SACV',
+    'OAC'
 ]
